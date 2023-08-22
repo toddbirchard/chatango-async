@@ -46,7 +46,7 @@ def get_server(group: str):
     """
     Get the server host for a certain room.
 
-    @param str group: room name
+    :param str group: room name
 
     :returns: str
     """
@@ -236,7 +236,7 @@ def _strip_html(msg: str) -> str:
     if len(li) == 1:
         return li[0]
     else:
-        ret = list()
+        ret = []
         for data in li:
             data = data.split(">", 1)
             if len(data) == 1:
@@ -299,8 +299,7 @@ def _parseFont(f: str, pm=False) -> Tuple[str, str, str]:
     match = re.search(regex, f)
     if not match:
         return "11", "000000", "0"
-    else:
-        return match.groups()
+    return match.groups()
 
 
 def _videoImagePMFormat(text):
@@ -319,6 +318,8 @@ def _videoImagePMFormat(text):
 
 
 class Styles:
+    """User message styles."""
+
     def __init__(
         self,
         name_color=None,
@@ -334,7 +335,7 @@ class Styles:
         self._use_background = int(use_background) if use_background else 0
 
         self._blend_name = None
-        self._bgstyle = {
+        self.bgstyle = {
             "align": "",
             "bgc": "",
             "bgalp": "",
@@ -356,6 +357,10 @@ class Styles:
         return f"nc:{self.name_color} |bg:{self.use_background} |{self.default}"
 
     @property
+    def profile(self):
+        return self._profile
+
+    @property
     def aboutme(self):
         return self._profile["about"]
 
@@ -364,20 +369,14 @@ class Styles:
         o = html.escape(urllib.parse.unquote(self._profile["full"] or "")).replace("\r\n", "\n")
         if o:
             return o
-        else:
-            return None
+        return None
 
     @property
     def fullmini(self):
         o = html.escape(urllib.parse.unquote(self._profile["about"]["body"] or "")).replace("\r\n", "\n")
         if o:
             return o
-        else:
-            return None
-
-    @property
-    def bgstyle(self):
-        return self._bgstyle
+        return None
 
     @property
     def use_background(self):
@@ -404,6 +403,21 @@ class Styles:
     @property
     def font_face(self):
         return self._font_face
+
+    def set_name_color(self, color):
+        self._name_color = color
+
+    def set_font_color(self, color):
+        self._font_color = color
+
+    def set_font_face(self, face):
+        self._font_face = face
+
+    def set_font_size(self, size):
+        self._font_size = size
+
+    def set_use_background(self, use_background):
+        self._use_background = use_background
 
 
 def _convert_dict(src):

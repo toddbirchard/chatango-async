@@ -1,17 +1,16 @@
-import aiohttp
-import asyncio
+from typing import Optional
+from collections import deque, namedtuple
 import sys
 import html
-import sys
 import time
 import enum
 import re
 import logging
 import traceback
+import asyncio
 import urllib.request as urlreq
 
-from collections import deque, namedtuple
-from typing import Optional
+import aiohttp
 
 from .utils import (
     get_aiohttp_session,
@@ -136,9 +135,7 @@ class Connection:
         await self.handler._call_event("disconnect", self)
 
     async def _do_process(self, recv: str):
-        """
-        Process one command
-        """
+        """Process one command."""
         if recv:
             cmd, _, args = recv.partition(":")
             args = args.split(":")
@@ -150,8 +147,7 @@ class Connection:
             except:
                 logger.error(f"Error while handling command {cmd}")
                 traceback.print_exc(file=sys.stderr)
-        else:
-            logger.error(f"Unhandled received command {cmd}")
+        logger.error(f"Unhandled received command {cmd}")
 
 
 class Room(Connection):
@@ -176,7 +172,7 @@ class Room(Connection):
         self._userdict = dict()
         self._mqueue = dict()
         self._uqueue = dict()
-        self._msgs = dict()
+        self.msgs = dict()
         self._users = dict()
         self._unid = str()
         self._banlist = dict()
@@ -310,23 +306,37 @@ class Room(Connection):
                 break
             await asyncio.sleep(3)
 
-    async def _auth(self, user_name: str = "", password: str = ""):
+    async def _auth(self, user_name: str, password: str):
         """
-        Login when joining a room
+        Login when joining a room.
+
+        :param str user_name: Name of Chatango user to authenticate as.
+        :param str password: Password of Chatango user to authenticate with.
         """
         await self._send_command("bauth", self.name, self._uid, user_name, password)
 
-    async def _login(self, user_name: str = "", password: str = ""):
+    async def _login(self, user_name: str, password: str):
         """
-        Login after having connected as anon
+        Login after having connected as anon.
+
+        :param str user_name: Name of Chatango user to authenticate as.
+        :param str password: Password of Chatango user to authenticate with.
         """
         self._user = User(user_name, isanon=not password)
         await self._send_command("blogin", user_name, password)
 
     async def _logout(self):
+        """Log out of current Chatango user account"""
         await self._send_command("blogout")
 
-    async def send_message(self, message, use_html=False, flags=None):
+    async def send_message(self, message: Message, use_html=True, flags=None):
+        """
+        Send chat message to Chatango room.
+
+        :param RoomMessage message: Message to send to Chatango room.
+        :param bool use_html: Whether to use HTML formatting.
+
+        """
         if not self.silent:
             message_flags = flags if flags else self.message_flags + self.badge or 0 + self.badge
             msg = str(message)
@@ -339,13 +349,13 @@ class Room(Connection):
 
     def set_font(self, name_color=None, font_color=None, font_size=None, font_face=None):
         if name_color:
-            self._user._styles._name_color = str(name_color)
+            self._user.user_styles.set_name_color(str(name_color))
         if font_color:
-            self._user._styles._font_color = str(font_color)
+            self._user.user_styles.set_font_color(str(font_color))
         if font_size:
-            self._user._styles._font_size = int(font_size)
+            self._user.user_styles.set_font_size(int(font_size))
         if font_face:
-            self._user._styles._font_face = int(font_face)
+            self._user.user_styles.set_font_face(int(font_face))
 
     async def enable_bg(self):
         await self.set_bg_mode(1)
@@ -527,19 +537,19 @@ class Room(Connection):
         await self._send_command("getratelimit")
         await self.request_banlist()
         await self.request_unbanlist()
-        if self.user.ispremium:
+        if self.user.is_premium_user:
             await self._style_init(self._user)
 
     async def set_bg_mode(self, mode):
         self._bgmode = mode
         if self.connected:
             await self._send_command("getpremium", "l")
-            if self.user.ispremium:
+            if self.user.is_premium_user:
                 await self._send_command("msgbg", str(self._bgmode))
 
     async def _style_init(self, user):
         if not user.isanon:
-            if self.user.ispremium:
+            if self.user.is_premium_user:
                 await user.get_styles()
             await user.get_main_profile()
         else:
@@ -622,14 +632,14 @@ class Room(Connection):
 
     async def _rcmd_premium(self, args):  # TODO
         if self._bgmode and (args[0] == "210" or (isinstance(self, Room) and self.owner == self.user)):
-            self.user._ispremium = True
+            self.user.is_premium_user = True
             await self._send_command("msgbg", str(self._bgmode))
 
     async def _rcmd_show_fw(self, args=None):
         await self.handler._call_event("flood_warning")
 
     async def _rcmd_u(self, args):
-        """attachs and call event on_message"""
+        """Attachs and call event on_message"""
         if args[0] in self._mqueue:
             msg = self._mqueue.pop(args[0])
             if msg.user != self._user:
@@ -641,7 +651,7 @@ class Room(Connection):
             self._uqueue[args[0]] = args[1]
 
     async def _rcmd_gparticipants(self, args):
-        """old command, chatango keep sending it."""
+        """Old command, chatango keep sending it."""
         await self._rcmd_g_participants(len(args) > 1 and args[1:] or "")
 
     async def _rcmd_g_participants(self, args):
@@ -844,7 +854,7 @@ class Room(Connection):
 
     async def _rcmd_delete(self, args):
         """Borrar un mensaje de mi vista actual"""
-        msg = self._msgs.get(args[0])
+        msg = self.msgs.get(args[0])
         if msg and msg in self._history:
             self._history.remove(msg)
             await self.handler._call_event("message_delete", msg.user, msg)
@@ -856,9 +866,9 @@ class Room(Connection):
     async def _rcmd_deleteall(self, args):
         """Mensajes han sido borrados"""
         user = None  # usuario borrado
-        msgs = list()  # mensajes borrados
+        msgs = []  # mensajes borrados
         for msgid in args:
-            msg = self._msgs.get(msgid)
+            msg = self.msgs.get(msgid)
             if msg and msg in self._history:
                 self._history.remove(msg)
                 user = msg.user
@@ -923,7 +933,7 @@ class Room(Connection):
         pass  # Auto moderation temporary ban
 
     async def _rcmd_tb(self, args):
-        """Temporary ban sigue activo con el tiempo indicado"""
+        """Temporary ban sigue activo con el tiempo indicado."""
         # print(f"{self.name}_rcmd_tb", args)
         await self.handler._call_event("flood_ban_repeat", int(args[0]))
 
@@ -941,10 +951,10 @@ class Room(Connection):
     async def _rcmd_updateprofile(self, args):
         """Cuando alguien actualiza su perfil en un chat"""
         user = User.get(args[0])
-        user._profile = None
+        user.profile = None
         await self.handler._call_event("profile_changes", user)
 
     async def _rcmd_reload_profile(self, args):
         user = User.get(args[0])
-        user._profile = None
+        user.profile = None
         await self.handler._call_event("profile_reload", user)

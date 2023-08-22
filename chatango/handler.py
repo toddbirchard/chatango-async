@@ -1,8 +1,11 @@
+"""Async event handler."""
 import inspect
 import logging
 
 
 class EventHandler:
+    """Event handler for Chatango."""
+
     async def on_event(self, event: str, *args, **kwargs):
         if "ping" in event or "pong" in event:
             return
@@ -31,10 +34,14 @@ class EventHandler:
 
 
 class CommandHandler:
+    """Command handler for Chatango messages."""
+
     async def on_command(self, command: str, *args, **kwargs):
+        """Log received commands."""
         logging.getLogger(__name__).debug(f"{command} {repr(args)} {repr(kwargs)}")
 
     async def _call_command(self, command: str, *args, **kwargs):
+        """Call underlying Chatango command."""
         attr = f"_rcmd_{command}"
         await self.on_command(command, *args, **kwargs)
         if hasattr(self, attr):

@@ -1,3 +1,4 @@
+"""Chatango Messages."""
 import re
 import time
 import enum
@@ -8,6 +9,8 @@ from .user import User
 
 
 class MessageFlags(enum.IntFlag):
+    """Message flags."""
+
     PREMIUM = 1 << 2
     BG_ON = 1 << 3
     MEDIA_ON = 1 << 4
@@ -39,6 +42,8 @@ Fonts = {
 
 
 class Message:
+    """Chatango message sent by client, to either `room` or via `pm`."""
+
     def __init__(self):
         self.user: Optional[User] = None
         self.room = None
@@ -56,33 +61,39 @@ class Message:
 
 
 class PMMessage(Message):
+    """Private message object."""
+
     def __init__(self):
         self.msgoff = False
         self.flags = str(0)
 
 
 class RoomMessage(Message):
+    """Room message object."""
+
     def __init__(self):
         self.id = None
         self.puid = str()
         self.ip = str()
         self.unid = str()
         self.flags = 0
-        self.mentions = list()
+        self.mentions = []
 
     def attach(self, room, msgid):
+        """`Attach` message to room."""
         if self.id is not None:
             self.room = room
             self.id = msgid
-            self.room._msgs.update({id: self})
+            self.room.msgs.update({id: self})
 
     def detach(self):
-        if self.id is not None and self.id in self.room._msgs:
-            self.room._msgs.pop(self.id)
+        """`Detach` message from room."""
+        if self.id is not None and self.id in self.room.msgs:
+            self.room.msgs.pop(self.id)
 
 
 async def _process(room, args):
-    """Process message"""
+    """Process message."""
     _time = float(args[0]) - room._correctiontime
     name, tname, puid, unid, msgid, ip, flags = args[1:8]
     body = ":".join(args[9:])
@@ -116,23 +127,23 @@ async def _process(room, args):
         else:
             name_color = None
     msg.user = User(name, ip=ip, isanon=isanon)
-    msg.user._styles._name_color = name_color
-    msg.styles = msg.user._styles
-    msg.styles._font_size, msg.styles._font_color, msg.styles._font_face = _parseFont(f.strip())
-    if msg.styles._font_size == None:
-        msg.styles._font_size = 11
+    msg.user.user_styles.set_name_color(name_color)
+    msg.styles = msg.user.user_styles
+    # msg.styles.font_size, msg.styles._font_color, msg.styles._font_face = _parseFont(f.strip())
+    if msg.styles.font_size is None:
+        msg.styles.set_font_size(11)
     msg.flags = MessageFlags(int(flags))
     if MessageFlags.BG_ON in msg.flags:
         if MessageFlags.PREMIUM in msg.flags:
-            msg.styles._use_background = 1
+            msg.styles.set_use_background(1)
     msg.mentions = mentions(msg.body, room)
     msg.channel = Channel(msg.room, msg.user)
-    ispremium = MessageFlags.PREMIUM in msg.flags
-    if msg.user.ispremium != ispremium:
-        evt = msg.user._ispremium != None and ispremium != None and _time > time.time() - 5
-        msg.user._ispremium = ispremium
+    is_premium = MessageFlags.PREMIUM in msg.flags
+    if msg.user.is_premium_user != is_premium:
+        evt = msg.user.is_premium_user is not None and is_premium is not None and _time > time.time() - 5
+        msg.user.set_premium_user(is_premium)
         if evt:
-            await room.handler._call_event("premium_change", msg.user, ispremium)
+            await room.handler._call_event("premium_change", msg.user, is_premium)
     return msg
 
 
@@ -152,11 +163,11 @@ async def _process_pm(room, args):
     msg.time = mtime
     msg.body = body
     msg.raw = rawmsg
-    msg.styles = msg.user._styles
-    msg.styles._name_color = name_color
-    msg.styles._font_size = font_size
-    msg.styles._font_color = font_color
-    msg.styles._font_face = font_face
+    msg.styles = msg.user.user_styles
+    msg.styles.name_color = name_color
+    msg.styles.font_size = font_size
+    msg.styles.set_font_color(font_color)
+    msg.styles.set_font_face(font_face)
     msg.channel = Channel(msg.room, msg.user)
     return msg
 

@@ -1,11 +1,18 @@
+"""Bot implementation demo."""
 import asyncio
 import typing
-from config import Config
+from config import config
 import chatango
 
 
 class MyBot(chatango.Client):
     """Example Chatango Bot Implementation."""
+
+    def __init__(self, name: str, password: str):
+        """Bot constructor."""
+        super().__init__(config.CHATANGO_BOT_USERNAME, config.CHATANGO_BOT_PASSWORD, config.CHATANGO_ROOMS)
+        self.bot_username = name
+        self.password = password
 
     async def on_init(self):
         """Action upon bot initialization."""
@@ -13,12 +20,12 @@ class MyBot(chatango.Client):
 
     async def on_start(self):
         """Action upon bot start."""
-        if Config.rooms:
-            for room in Config.rooms:
-                task = self.join(room)
+        if config.rooms:
+            for room in config.rooms:
+                task = room.join(room)
                 await asyncio.ensure_future(task)
             await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})
-            print("[info] Bot has joined sucessfully all the rooms")
+            print("[info] Bot has joined successfully all the rooms")
         else:
             print("[info] config.rooms is empty.")
 
@@ -38,6 +45,7 @@ class MyBot(chatango.Client):
         print(f"[info] Rejected from {repr(room)}, ROOM must be deleted.")
 
     async def on_room_init(self, room):
+        """Action upon room initialization."""
         if room.user.isanon:
             room.set_font(name_color="000000", font_color="000000", font_face=1, font_size=11)
         else:
@@ -59,16 +67,22 @@ class MyBot(chatango.Client):
             print(f"[{room_name}] [{user_name}] [{message.ip}]: {chat_message}")
         else:
             print(f"[{room_name}] [{user_name}] [no IP address]: {chat_message}")
-        
+
+
+def init_demo():
+    """Demo Chatango client with single bot."""
+    all_bots = []
+    bot = MyBot(config.CHATANGO_BOT_USERNAME, config.CHATANGO_BOT_PASSWORD)
+    for room in config.CHATANGO_ROOMS:
+        all_bots.append(bot.join_room(room))
+    return all_bots
+
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    bot = MyBot()
-    bot.default_user(Config.botuser[0], Config.botuser[1])  # easy_start
-    activate_pm_if_password = True if Config.botuser[1] else False
-    ListBots = [bot.start(pm=activate_pm_if_password)]  # Multiple instances
-    task = asyncio.gather(*ListBots, return_exceptions=True)
+    all_bots = init_demo()
+    task = asyncio.gather(*all_bots, return_exceptions=True)
     try:
         loop.run_until_complete(task)
         loop.run_forever()

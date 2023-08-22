@@ -16,11 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 class Socket:
+    """"""
+
     def __init__(self, handler: EventHandler):
         self.handler = handler
         self._reset()
 
     def _reset(self):
+        """Reset socket connection."""
         self._connected = False
         self._first_command = True
         self._recv: Optional[asyncio.StreamReader] = None
@@ -29,7 +32,8 @@ class Socket:
         self._ping_task: Optional[asyncio.Task] = None
 
     @property
-    def connected(self):
+    def connected(self) -> bool:
+        """Whether the socket is connected."""
         return self._connected
 
     async def _connect(self, server: str, port: int):

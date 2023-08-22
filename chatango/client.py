@@ -1,3 +1,4 @@
+"""Top-level Chatango client handler."""
 import asyncio
 import logging
 from typing import Coroutine, Dict, List, Optional
@@ -12,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class Client(EventHandler):
-    def __init__(self, username: str = "", password: str = "", rooms: List[str] = [], pm=False):
+    """Chatango top-level client."""
+
+    def __init__(self, username: str, password: str, rooms: List[str], pm: bool = False):
         self._tasks: List[asyncio.Task] = []
         self.running = False
         self.rooms: Dict[str, Room] = {}
@@ -25,13 +28,20 @@ class Client(EventHandler):
     def __dir__(self):
         return public_attributes(self)
 
-    def add_task(self, coro: Coroutine):
-        self._tasks.append(asyncio.create_task(coro))
+    def add_task(self, task: Coroutine):
+        """
+        Add async task to event loop.
+
+        :param Coroutine task: Task to add to event loop.
+        """
+        self._tasks.append(asyncio.create_task(task))
 
     def _prune_tasks(self):
+        """Remove completed tasks from event loop."""
         self._tasks = [task for task in self._tasks if not task.done()]
 
     async def _task_loop(self, forever=False):
+        """Run tasks in event loop."""
         while self._tasks or forever:
             await asyncio.gather(*self._tasks)
             self._prune_tasks()
@@ -39,6 +49,7 @@ class Client(EventHandler):
                 await asyncio.sleep(0.1)
 
     async def run(self, *, forever=False):
+        """Initialize client."""
         self.running = True
         await self._call_event("init")
 
@@ -56,7 +67,10 @@ class Client(EventHandler):
         await self._task_loop(forever)
         self.running = False
 
+        return self.initial_rooms
+
     def join_pm(self):
+        """Begin a PM session with a Chatango user."""
         if not self.username or not self.password:
             logger.error("PM requires username and password.")
             return
@@ -64,33 +78,52 @@ class Client(EventHandler):
         self.add_task(self._watch_pm())
 
     async def _watch_pm(self):
+        """Listen for activity in PM session."""
         pm = PM(self)
         self.pm = pm
         await pm.listen(self.username, self.password, reconnect=True)
         self.pm = None
 
     def leave_pm(self):
+        """Disconnect from PM session."""
         if self.pm:
             self.add_task(self.pm.disconnect())
 
-    def get_room(self, room_name: str):
+    def get_room(self, room_name: str) -> str:
+        """
+        Validate and return name of Chatango room.
+
+        :param str room_name: Name of Chatango room.
+
+        :returns: str
+        """
         Room.assert_valid_name(room_name)
         return self.rooms.get(room_name)
 
-    def in_room(self, room_name: str):
+    def in_room(self, room_name: str) -> List[str]:
+        """
+        Lit of Chatango room names client is currently connected to.
+
+        :param str room_name: Name of Chatango room.
+
+        :returns: List[str]
+        """
         Room.assert_valid_name(room_name)
         return room_name in self.rooms
 
-    def join_room(self, room_name: str):
+    async def join_room(self, room_name: str):
+        """Connect to Chatango room."""
         Room.assert_valid_name(room_name)
         if self.in_room(room_name):
             logger.error(f"Already joined room {room_name}")
             # Attempt to reconnect existing room?
             return
 
-        self.add_task(self._watch_room(room_name))
+        room_name = await self._watch_room(room_name)
+        self.add_task(room_name)
 
     async def _watch_room(self, room_name: str):
+        """Attempt to join Chatango room."""
         room = Room(self, room_name)
         self.rooms[room_name] = room
         await room.listen(self.username, self.password, reconnect=True)
@@ -98,11 +131,17 @@ class Client(EventHandler):
         self.rooms.pop(room_name, None)
 
     def leave_room(self, room_name: str):
+        """
+        Disconnect from Chatango room.
+
+        :param str room_name: Name of Chatango room.
+        """
         room = self.get_room(room_name)
         if room:
             self.add_task(room.disconnect())
 
     def stop(self):
+        """Stop client."""
         if self.pm:
             self.leave_pm()
 
