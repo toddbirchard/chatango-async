@@ -85,12 +85,11 @@ def json_formatter(record: dict) -> str:
     if record["level"].name == "INFO":
         record["extra"]["serialized"] = serialize_as_admin(record)
         return "{extra[serialized]},\n"
-    elif record["level"].name in ("WARNING", "SUCCESS"):
+    if record["level"].name in ("WARNING", "SUCCESS"):
         record["extra"]["serialized"] = serialize_event(record)
         return "{extra[serialized]},\n"
-    else:
-        record["extra"]["serialized"] = serialize_error(record)
-        return "{extra[serialized]},\n"
+    record["extra"]["serialized"] = serialize_error(record)
+    return "{extra[serialized]},\n"
 
 
 def log_formatter(record: dict) -> str:
@@ -101,11 +100,11 @@ def log_formatter(record: dict) -> str:
     """
     if record["level"].name == "INFO":
         return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> | <fg #b3cfe7>{level}</fg #b3cfe7>: <light-white>{message}</light-white>\n"
-    elif record["level"].name == "WARNING":
+    if record["level"].name == "WARNING":
         return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> |  <fg #b09057>{level}</fg #b09057>: <light-white>{message}</light-white>\n"
-    elif record["level"].name == "SUCCESS":
+    if record["level"].name == "SUCCESS":
         return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> | <fg #6dac77>{level}</fg #6dac77>: <light-white>{message}</light-white>\n"
-    elif record["level"].name == "ERROR":
+    if record["level"].name == "ERROR":
         return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> | <fg #a35252>{level}</fg #a35252>: <light-white>{message}</light-white>\n"
     return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> | <fg #b3cfe7>{level}</fg #b3cfe7>: <light-white>{message}</light-white>\n"
 
@@ -113,6 +112,7 @@ def log_formatter(record: dict) -> str:
 def create_logger() -> logger:
     """
     Configure custom logger.
+
     :returns: logger
     """
     logger.remove()
@@ -139,15 +139,6 @@ def create_logger() -> logger:
         logger.add(
             "/var/log/broiestbot/info.json",
             format=json_formatter,
-            rotation="300 MB",
-            compression="zip",
-        )
-        # Datadog APM tracing
-        logger.add(
-            "/var/log/broiestbot/apm.json",
-            serialize=True,
-            catch=True,
-            format="{time:YYYY-MM-DD at HH:mm:ss} | {level} | {message}",
             rotation="300 MB",
             compression="zip",
         )

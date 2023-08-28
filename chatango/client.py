@@ -51,7 +51,7 @@ class Client(EventHandler):
     async def run(self, *, forever=False):
         """Initialize client."""
         self.running = True
-        await self._call_event("init")
+        await self.call_event("init")
 
         if not forever and not self.use_pm and not self.initial_rooms:
             logger.error("No rooms or PM to join. Exiting.")
@@ -63,7 +63,7 @@ class Client(EventHandler):
         for room_name in self.initial_rooms:
             self.join_room(room_name)
 
-        await self._call_event("start")
+        await self.call_event("start")
         await self._task_loop(forever)
         self.running = False
 

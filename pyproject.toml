@@ -31,8 +31,8 @@ run = "example"
 issues = "https://github.com/toddbirchard/chatango-async/issues"
 
 [build-system]
-requires = ["poetry>=1.5.1"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.isort]
 profile = "black"

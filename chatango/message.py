@@ -64,6 +64,7 @@ class PMMessage(Message):
     """Private message object."""
 
     def __init__(self):
+        super().__init__()
         self.msgoff = False
         self.flags = str(0)
 
@@ -72,6 +73,7 @@ class RoomMessage(Message):
     """Room message object."""
 
     def __init__(self):
+        super().__init__()
         self.id = None
         self.puid = str()
         self.ip = str()
@@ -143,7 +145,7 @@ async def _process(room, args):
         evt = msg.user.is_premium_user is not None and is_premium is not None and _time > time.time() - 5
         msg.user.set_premium_user(is_premium)
         if evt:
-            await room.handler._call_event("premium_change", msg.user, is_premium)
+            await room.handler.call_event("premium_change", msg.user, is_premium)
     return msg
 
 
@@ -181,7 +183,7 @@ def message_cut(message, lenth):
 
 def mentions(body, room):
     t = []
-    for match in re.findall("(\s)?@([a-zA-Z0-9]{1,20})(\s)?", body):
+    for match in re.findall(r"(\s)?@([a-zA-Z0-9]{1,20})(\s)?", body):
         for participant in room.userlist:
             if participant.name.lower() == match[1].lower():
                 if participant not in t:
@@ -191,7 +193,7 @@ def mentions(body, room):
 
 class Channel:
     def __init__(self, room, user):
-        self.is_pm = True if room.name == "<PM>" else False
+        self.is_pm = self._is_pm(room)
         self.user = user
         self.room = room
 
@@ -199,12 +201,17 @@ class Channel:
         return public_attributes(self)
 
     async def send_message(self, message, use_html=False):
-        messages = message_cut(message, self.room._maxlen)
+        messages = message_cut(message, self.room.get_maxlen())
         for message in messages:
             if self.is_pm:
                 await self.room.send_message(self.user.name, message, use_html=use_html)
             else:
                 await self.room.send_message(message, use_html=use_html)
+
+    async def _is_pm(self, room):
+        if room.name == "<PM>":
+            return True
+        return False
 
     async def send_pm(self, message):
         self.is_pm = True

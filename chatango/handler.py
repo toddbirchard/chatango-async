@@ -18,7 +18,7 @@ class EventHandler:
         kwargs_section = "" if not kwargs else repr(kwargs)
         logging.getLogger(__name__).debug(f"EVENT {event} {args_section} {kwargs_section}")
 
-    async def _call_event(self, event: str, *args, **kwargs):
+    async def call_event(self, event: str, *args, **kwargs):
         attr = f"on_{event}"
         await self.on_event(event, *args, **kwargs)
         if hasattr(self, attr):
