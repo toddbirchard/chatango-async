@@ -1,4 +1,4 @@
-"""Top-level Chatango client handler."""
+"""Top-level Chatango client event-handler."""
 import asyncio
 import logging
 from typing import Coroutine, Dict, List, Optional
@@ -28,13 +28,13 @@ class Client(EventHandler):
     def __dir__(self):
         return public_attributes(self)
 
-    def add_task(self, task: Coroutine):
+    def add_task(self, coro: Coroutine):
         """
         Add async task to event loop.
 
         :param Coroutine task: Task to add to event loop.
         """
-        self._tasks.append(asyncio.create_task(task))
+        self._tasks.append(asyncio.create_task(coro))
 
     def _prune_tasks(self):
         """Remove completed tasks from event loop."""
@@ -67,8 +67,6 @@ class Client(EventHandler):
         await self._task_loop(forever)
         self.running = False
 
-        return self.initial_rooms
-
     def join_pm(self):
         """Begin a PM session with a Chatango user."""
         if not self.username or not self.password:
@@ -89,7 +87,7 @@ class Client(EventHandler):
         if self.pm:
             self.add_task(self.pm.disconnect())
 
-    def get_room(self, room_name: str) -> str:
+    def get_room(self, room_name: str):
         """
         Validate and return name of Chatango room.
 
@@ -100,18 +98,18 @@ class Client(EventHandler):
         Room.assert_valid_name(room_name)
         return self.rooms.get(room_name)
 
-    def in_room(self, room_name: str) -> List[str]:
+    def in_room(self, room_name: str):
         """
-        Lit of Chatango room names client is currently connected to.
+        Check if client is in Chatango room.
 
         :param str room_name: Name of Chatango room.
 
-        :returns: List[str]
+        :returns: str
         """
         Room.assert_valid_name(room_name)
         return room_name in self.rooms
 
-    async def join_room(self, room_name: str):
+    def join_room(self, room_name: str):
         """Connect to Chatango room."""
         Room.assert_valid_name(room_name)
         if self.in_room(room_name):
@@ -119,8 +117,7 @@ class Client(EventHandler):
             # Attempt to reconnect existing room?
             return
 
-        room_name = await self._watch_room(room_name)
-        self.add_task(room_name)
+        self.add_task(self._watch_room(room_name))
 
     async def _watch_room(self, room_name: str):
         """Attempt to join Chatango room."""
@@ -150,6 +147,6 @@ class Client(EventHandler):
 
     async def enable_bg(self, active=True):
         """Enable background if available."""
-        self.bgmode = active
+        self.bg_mode = active
         for _, room in self.rooms.items():
             await room.set_bg_mode(int(active))

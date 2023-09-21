@@ -1,6 +1,6 @@
 """Bot implementation demo."""
 import asyncio
-import typing
+from typing import Union, List
 from config import config
 import chatango
 
@@ -8,11 +8,9 @@ import chatango
 class MyBot(chatango.Client):
     """Example Chatango Bot Implementation."""
 
-    def __init__(self, name: str, password: str):
+    def __init__(self, name: str, password: str, rooms: List[str]):
         """Bot constructor."""
-        super().__init__(config.CHATANGO_BOT_USERNAME, config.CHATANGO_BOT_PASSWORD, config.CHATANGO_ROOMS)
-        self.bot_username = name
-        self.password = password
+        super().__init__(name, password, rooms, pm=False)
 
     async def on_init(self):
         """Action upon bot initialization."""
@@ -29,7 +27,7 @@ class MyBot(chatango.Client):
         else:
             print("[info] config.rooms is empty.")
 
-    async def on_connect(self, room: typing.Union[chatango.Room, chatango.PM]):
+    async def on_connect(self, room: Union[chatango.Room, chatango.PM]):
         """Action upon bot connection to a room."""
         print(f"[info] Connected to {repr(room)}")
 
@@ -67,27 +65,3 @@ class MyBot(chatango.Client):
             print(f"[{room_name}] [{user_name}] [{message.ip}]: {chat_message}")
         else:
             print(f"[{room_name}] [{user_name}] [no IP address]: {chat_message}")
-
-
-def init_demo():
-    """Demo Chatango client with single bot."""
-    all_bots = []
-    bot = MyBot(config.CHATANGO_BOT_USERNAME, config.CHATANGO_BOT_PASSWORD)
-    for room in config.CHATANGO_ROOMS:
-        all_bots.append(bot.join_room(room))
-    return all_bots
-
-
-if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    all_bots = init_demo()
-    task = asyncio.gather(*all_bots, return_exceptions=True)
-    try:
-        loop.run_until_complete(task)
-        loop.run_forever()
-    except Exception as e:
-        print(f"Fatal exception: {e}")
-    finally:
-        task.cancel()
-        loop.close()

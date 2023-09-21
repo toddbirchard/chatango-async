@@ -22,7 +22,7 @@ class Config(BaseSettings):
     CHATANGO_BOT_PASSWORD: str = getenv("CHATANGO_BOT_PASSWORD")
 
     # Chatango rooms to join
-    CHATANGO_ROOMS: List[str] = [getenv("CHATANGO_TEST_ROOM")]
+    CHATANGO_ROOMS: str = getenv("CHATANGO_TEST_ROOM")
 
 
 config = Config()

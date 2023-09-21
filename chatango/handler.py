@@ -16,7 +16,7 @@ class EventHandler:
         else:
             args_section = repr(args)
         kwargs_section = "" if not kwargs else repr(kwargs)
-        logging.getLogger(__name__).debug(f"EVENT {event} {args_section} {kwargs_section}")
+        logging.getLogger(__name__).debug("EVENT %s %s %s", event, args_section, kwargs_section)
 
     async def call_event(self, event: str, *args, **kwargs):
         attr = f"on_{event}"
@@ -36,9 +36,16 @@ class EventHandler:
 class CommandHandler:
     """Command handler for Chatango messages."""
 
+    async def _call_command(self, command: str, *args, **kwargs):
+        """Call underlying Chatango command."""
+        attr = f"_rcmd_{command}"
+        await self.on_command(command, *args, **kwargs)
+        if hasattr(self, attr):
+            await getattr(self, attr)(*args, **kwargs)
+
     async def on_command(self, command: str, *args, **kwargs):
         """Log received commands."""
-        logging.getLogger(__name__).debug(f"{command} {repr(args)} {repr(kwargs)}")
+        logging.getLogger(__name__).debug("%s %s %s", command, repr(args), repr(kwargs))
 
     async def _call_command(self, command: str, *args, **kwargs):
         """Call underlying Chatango command."""
