@@ -6,9 +6,9 @@ import html
 import re
 import string
 import aiohttp
-import urllib
-import logging
+from .hasher import Hasher
 
+from logger import LOGGER
 # fmt: off
 specials = {
     'mitvcanal': 56, 'animeultimacom': 34, 'cricket365live': 21,
@@ -50,9 +50,11 @@ def get_server(group: str):
 
     :returns: str
     """
-    try:
-        sn = specials[group]
-    except KeyError:
+    sn = specials.get(group)
+    if not sn:
+        hash = Hasher().hash(group)
+        sn = tshashes.get(hash)
+    if not sn:
         group = group.replace("_", "q")
         group = group.replace("-", "q")
         fnv = int(group[:5], 36)
@@ -78,8 +80,14 @@ def public_attributes(obj):
     return [x for x in set(list(obj.__dict__.keys()) + list(dir(type(obj)))) if x[0] != "_"]
 
 
+def public_attributes(obj):
+    return [
+        x for x in set(list(obj.__dict__.keys()) + list(dir(type(obj)))) if x[0] != "_"
+    ]
+
+
 async def on_request_exception(session, context, params):
-    logging.getLogger("aiohttp.client").debug(f"on request exception: <{params}>")
+    LOGGER.debug(f"on request exception: <{params}>")
 
 
 def trace():
@@ -159,38 +167,10 @@ def multipart(data, files, boundary=None):
     }
     return body, headers
 
-    # async def upload_image(self, path, return_url=False):
-    #     if self.user.isanon:
-    #         return None
-    #     with open(path, mode="rb") as f:
-    #         files = {
-    #             "filedata": {"filename": path, "content": f.read().decode("latin-1")}
-    #         }
-    #     data, headers = multipart(
-    #         dict(u=self.client._default_user_name, p=self.client._default_password),
-    #         files,
-    #     )
-    #     headers.update({"host": "chatango.com", "origin": "http://st.chatango.com"})
-    #     async with get_aiohttp_session.post(
-    #         "http://chatango.com/uploadimg",
-    #         data=data.encode("latin-1"),
-    #         headers=headers,
-    #     ) as resp:
-    #         response = await resp.text()
-    #         if "success" in response:
-    #             success = response.split(":", 1)[1]
-    #     if success != None:
-    #         if return_url:
-    #             url = "http://ust.chatango.com/um/{}/{}/{}/img/t_{}.jpg"
-    #             return url.format(
-    #                 self.user.name[0], self.user.name[1], self.user.name, success
-    #             )
-    #         else:
-    #             return f"img{success}"
-    #     return None
 
-
-async def sessionget(session: aiohttp.ClientSession, url: str):
+async def http_get(url: str, session: Optional[aiohttp.ClientSession] = None):
+    if not session:
+        session = get_aiohttp_session()
     async with session.get(url) as resp:
         assert resp.status == 200
         try:
@@ -198,15 +178,6 @@ async def sessionget(session: aiohttp.ClientSession, url: str):
             return resp
         except:
             return None
-
-
-async def make_requests(urls):
-    r = {}
-    for x in urls:
-        task = asyncio.create_task(sessionget(get_aiohttp_session(), x[1]))
-        r[x[0]] = task
-    await asyncio.gather(*r.values())
-    return r
 
 
 def gen_uid() -> str:
@@ -236,7 +207,7 @@ def _strip_html(msg: str) -> str:
     if len(li) == 1:
         return li[0]
     else:
-        ret = []
+        ret = list()
         for data in li:
             data = data.split(">", 1)
             if len(data) == 1:
@@ -277,7 +248,9 @@ def _fontFormat(text):
     for f in formats:
         f1, f2 = set(formats.keys()) - {f}
         # find = ' <?[BUI]?>?[{0}{1}]?{2}(.+?[\S]){2}'.format(f1, f2, f+'{1}')
-        find = " <?[BUI]?>?[{0}{1}]?{2}(.+?[\S]?[{2}]?){2}[{0}{1}]?[\s]".format(f1, f2, f)
+        find = " <?[BUI]?>?[{0}{1}]?{2}(.+?[\S]?[{2}]?){2}[{0}{1}]?[\s]".format(
+            f1, f2, f
+        )
         for x in re.findall(find, " " + text + " "):
             original = f[-1] + x + f[-1]
             cambio = "<" + formats[f] + ">" + x + "</" + formats[f] + ">"
@@ -299,7 +272,8 @@ def _parseFont(f: str, pm=False) -> Tuple[str, str, str]:
     match = re.search(regex, f)
     if not match:
         return "11", "000000", "0"
-    return match.groups()
+    else:
+        return match.groups()
 
 
 def _videoImagePMFormat(text):
@@ -315,115 +289,3 @@ def _videoImagePMFormat(text):
     for x in re.findall("http[s]?://[\S]+?.jpg", text):
         text = text.replace(x, '<i s="%s" w="70.45" h="125"/>' % x)
     return text
-
-
-class Styles:
-    """User message styles."""
-
-    def __init__(
-        self,
-        name_color=None,
-        font_color=None,
-        font_face=None,
-        font_size=None,
-        use_background=None,
-    ):
-        self._name_color = name_color if name_color else str("000000")
-        self._font_color = font_color if font_color else str("000000")
-        self._font_size = font_size if font_size else 11
-        self._font_face = font_face if font_face else 0
-        self._use_background = int(use_background) if use_background else 0
-
-        self._blend_name = None
-        self.bgstyle = {
-            "align": "",
-            "bgc": "",
-            "bgalp": "",
-            "hasrec": "0",
-            "ialp": "",
-            "isvid": "0",
-            "tile": "0",
-            "useimg": "0",
-        }
-        self._profile = dict(
-            about=dict(age="", last_change="", gender="?", location="", d="", body=""),
-            full=dict(),
-        )
-
-    def __dir__(self):
-        return public_attributes(self)
-
-    def __repr__(self):
-        return f"nc:{self.name_color} |bg:{self.use_background} |{self.default}"
-
-    @property
-    def profile(self):
-        return self._profile
-
-    @property
-    def aboutme(self):
-        return self._profile["about"]
-
-    @property
-    def fullhtml(self):
-        o = html.escape(urllib.parse.unquote(self._profile["full"] or "")).replace("\r\n", "\n")
-        if o:
-            return o
-        return None
-
-    @property
-    def fullmini(self):
-        o = html.escape(urllib.parse.unquote(self._profile["about"]["body"] or "")).replace("\r\n", "\n")
-        if o:
-            return o
-        return None
-
-    @property
-    def use_background(self):
-        return self._use_background
-
-    @property
-    def default(self):
-        size = str(self.font_size)
-        face = str(self.font_face)
-        return f"<f x{size}{self.font_color}='{face}'>"
-
-    @property
-    def name_color(self):
-        return self._name_color
-
-    @property
-    def font_color(self):
-        return self._font_color
-
-    @property
-    def font_size(self):
-        return self._font_size
-
-    @property
-    def font_face(self):
-        return self._font_face
-
-    def set_name_color(self, color):
-        self._name_color = color
-
-    def set_font_color(self, color):
-        self._font_color = color
-
-    def set_font_face(self, face):
-        self._font_face = face
-
-    def set_font_size(self, size):
-        self._font_size = size
-
-    def set_use_background(self, use_background):
-        self._use_background = use_background
-
-
-def _convert_dict(src):
-    r = {}
-    m = src.split(" ")
-    for w in m:
-        k, v = w.split("=")
-        r.update({k: v})
-    return r

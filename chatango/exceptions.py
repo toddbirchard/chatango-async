@@ -13,17 +13,14 @@ class BaseRoomError(Exception):
 
 class AlreadyConnectedError(BaseRoomError):
     """Raised when attempting to connect to a room that is already connected to."""
-
     pass
 
 
 class NotConnectedError(BaseRoomError):
     """Raised when attempting to disconnect from a room that is not connected to."""
-
     pass
 
 
 class InvalidRoomNameError(BaseRoomError):
     """Raised when attempting to connect to a room with an invalid name."""
-
     pass

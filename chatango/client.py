@@ -12,6 +12,14 @@ from .utils import public_attributes
 logger = logging.getLogger(__name__)
 
 
+class ConnectionListener:
+    def __init__(self, client):
+        self.client = client
+
+    async def on_connect(self, room):
+        self.client.initial_rooms_connected.append(room.name)
+
+
 class Client(EventHandler):
     """Chatango top-level client."""
 

@@ -7,15 +7,15 @@ from typing import Optional
 
 from .utils import get_token, gen_uid, public_attributes
 from .exceptions import AlreadyConnectedError
-from .handler import EventHandler
+from .handler import CommandHandler, EventHandler, TaskHandler
 from .user import User, Friend
 from .message import _process_pm, message_cut
 
 
-logger = logging.getLogger(__name__)
+from logger import LOGGER
 
 
-class Socket:
+class Socket(CommandHandler):
     """"""
 
     def __init__(self, handler: EventHandler):
@@ -58,7 +58,7 @@ class Socket:
             terminator = "\r\n\0"
         message = ":".join(args) + terminator
         if message != "\r\n\r\n\x00":  # ping
-            logger.debug(f'OUT {":".join(args)}')
+            LOGGER.debug(f'OUT {":".join(args)}')
         if self._connection:
             self._connection.write(message.encode())
             await self._connection.drain()
@@ -78,46 +78,19 @@ class Socket:
             pass
 
     async def _do_recv(self):
-        """
-        Receive and process data from the socket
-        """
+        """Receive and process data from the socket"""
         while self._recv:
             data: bytes = await self._recv.read(2048)
-            if not self.connected:
-                break
-            if data:
+            if self.connected and data:
                 data_str: str = data.decode()
-                if data_str == "\r\n\x00":
-                    await self._do_process("pong")
-                else:
+                if data_str != "\r\n\x00":  # pong
                     cmds = data_str.split("\r\n\x00")
                     for cmd in cmds:
-                        if cmd != "":
-                            logger.debug(f" IN {cmd}")
-                            await self._do_process(cmd)
+                        await self._receive_command(cmd)
             else:
-                await self._disconnect()
                 break
             await asyncio.sleep(0.0001)
-        await self.handler.call_event("pm_disconnect", self)
-
-    async def _do_process(self, recv: str):
-        """
-        Process one command
-        """
-        if recv:
-            cmd, _, args = recv.partition(":")
-            args = args.split(":")
-        else:
-            return
-        if hasattr(self, f"_rcmd_{cmd}"):
-            try:
-                await getattr(self, f"_rcmd_{cmd}")(args)
-            except:
-                logger.error(f"Error while handling command {cmd}")
-                traceback.print_exc(file=sys.stderr)
-        else:
-            logger.error(f"Unhandled received command {cmd}")
+        await self._disconnect()
 
 
 class PM(Socket):
