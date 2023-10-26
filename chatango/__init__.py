@@ -5,5 +5,7 @@ from .exceptions import *
 from .pm import *
 from .utils import *
 from .user import *
+from .message import *
+from .handler import *
 
-__version__ = "0.01"
+__version__ = "0.0.1"

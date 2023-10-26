@@ -1,12 +1,14 @@
+"""Chatango User objects."""
 import enum
 import json, urllib
 from typing import Any, Optional
+import html
 import re
 import time
 import datetime
 from collections import deque
 
-from .utils import Styles, make_requests, public_attributes
+from .utils import http_get, public_attributes
 
 
 class ModeratorFlags(enum.IntFlag):
@@ -41,67 +43,60 @@ AdminFlags = (
 
 
 class User:
-    """Chatango user object."""
-
     _users = {}
 
     def __new__(cls, name, **kwargs):
         key = name.lower()
-        if key in cls._users:
-            for attr, val in kwargs.items():
-                if attr == "ip" and not val:
-                    continue  # only valid ips
-                setattr(cls._users[key], "_" + attr, val)
-            return cls._users[key]
-        self = super().__new__(cls)
-        self._styles = Styles()
-        cls._users[key] = self
-        self._name = name.lower()
-        self._ip = None
-        self._flags = 0
-        self._history = deque(maxlen=5)
-        self._isanon = False
-        self._sids = dict()
-        self._showname = name
-        self._is_premium = None
-        self._puid = str()
-        self._client = None
-        self._last_time = None
-        self._blend_name = None
-        for attr, val in kwargs.items():
-            setattr(self, "_" + attr, val)
-        return self
+        if key in User._users:
+            user = User._users[key]
+        else:
+            user = super().__new__(cls)
+            setattr(user, "__new_obj", True)
+            User._users[key] = user
+        return user
 
-    @classmethod
-    def get(cls, name):
-        """Get user object(s) by name."""
-        return cls._users.get(name) or User(name)
+    def __init__(self, name, **kwargs):
+        if hasattr(self, "__new_obj"):
+            self._styles = Styles()
+            self._name = name.lower()
+            self._ip = None
+            self._flags = 0
+            self._history = deque(maxlen=5)
+            self._isanon = False
+            self._sids = dict()
+            self._showname = name
+            self._ispremium = None
+            self._puid = str()
+            self._client = None
+            self._last_time = None
+            delattr(self, "__new_obj")
+
+        for attr, val in kwargs.items():
+            if attr == "ip" and not val:
+                continue  # only valid ips
+            setattr(self, "_" + attr, val)
 
     def __dir__(self):
         return public_attributes(self)
 
-    def __repr__(self) -> str:
-        return "<User: %s>" % self.showname
+    def __repr__(self):
+        return "<User name:{} puid:{} ip:{}>".format(self.showname, self._puid, self._ip)
 
     @property
     def age(self):
-        """User age."""
-        return self.styles.profile["about"].get("age")
+        return self.styles._profile["about"]["age"]
 
     @property
     def last_change(self):
-        """Last change made to user's profile."""
-        return self.styles.profile["about"].get("last_change")
+        return self.styles._profile["about"]["last_change"]
 
     @property
     def gender(self):
-        """User gender."""
-        return self.styles.profile["about"].get("gender")
+        return self.styles._profile["about"]["gender"]
 
     @property
     def location(self):
-        """User location."""
-        return self.styles.profile["about"].get("location")
+        return self.styles._profile["about"]["location"]
 
     @property
     def get_user_dir(self):
@@ -126,7 +121,7 @@ class User:
 
     @property
     def styles(self):
-        return self.user_styles
+        return self._styles
 
     @property
     def thumb(self):
@@ -147,59 +142,51 @@ class User:
         return self._name
 
     @property
-    def user_styles(self):
-        return self._styles
-
-    @property
-    def blend_name(self):
-        return self._blend_name
-
-    @property
     def puid(self):
         return self._puid
 
     @property
-    def is_premium_user(self):
-        return self._is_premium
+    def ispremium(self):
+        return self._ispremium
 
     @property
     def showname(self):
         return self._showname
 
     @property
-    def _links(self):
-        return [
-            ["msgstyles", f"{self._ust}{self.get_user_dir}msgstyles.json"],
-            ["msgbg", f"{self._ust}{self.get_user_dir}msgbg.xml"],
-            ["mod1", f"{self._ust}{self.get_user_dir}mod1.xml"],
-            ["mod2", f"{self._ust}{self.get_user_dir}mod2.xml"],
-        ]
+    def links(self):
+        return {
+            "msgstyles": f"{self._ust}{self.get_user_dir}msgstyles.json",
+            "msgbg": f"{self._ust}{self.get_user_dir}msgbg.xml",
+            "mod1": f"{self._ust}{self.get_user_dir}mod1.xml",
+            "mod2": f"{self._ust}{self.get_user_dir}mod2.xml",
+        }
 
     @property
     def isanon(self):
         return self._isanon
 
-    def setName(self, val):
+    def set_name(self, val):
         self._showname = val
         self._name = val.lower()
 
     def del_profile(self):
-        if self.user_styles.profile:
-            del self.user_styles.profile
-            self.user_styles.profile.update(dict(about={}, full={}))
+        if self.styles._profile:
+            del self._styles._profile
+            self._styles._profile.update(dict(about={}, full={}))
 
-    def addSessionId(self, room, sid):
+    def add_session_id(self, room, sid):
         if room not in self._sids:
             self._sids[room] = set()
         self._sids[room].add(sid)
 
-    def getSessionIds(self, room=None):
+    def get_session_ids(self, room=None):
         if room:
             return self._sids.get(room, set())
         else:
             return set.union(*self._sids.values())
 
-    def removeSessionId(self, room, sid):
+    def remove_session_id(self, room, sid):
         if room in self._sids:
             if not sid:
                 self._sids[room].clear()
@@ -216,76 +203,154 @@ class User:
             "br": "bottom right",
         }
         if not self.isanon:
-            tasks = await make_requests(self._links[:2])
-            msg_styles = tasks["msgstyles"].result()
-            msg_bg = tasks["msgbg"].result()
+            msg_styles = await http_get(self.links["msgstyles"])
+            msg_bg = await http_get(self.links["msgbg"])
             if msg_bg:
                 bg = msg_bg.replace('<?xml version="1.0" ?>', "")
-                bg_dict = dict(url.replace('"', "").split("=") for url in re.findall('(\w+=".*?")', bg))
-                self.user_styles.bgstyle.update(bg_dict)
-                self.user_styles.bgstyle["align"] = position_dict.get(self.user_styles.bgstyle["align"])
+                bg_dict = dict(url.replace('"', "").split("=") for url in re.findall(r'(\w+=".*?")', bg))
+                self._styles._bg_style.update(bg_dict)
+                self._styles._bg_style["align"] = position_dict.get(self._styles._bg_style["align"])
             if msg_styles:
                 try:
                     styles = json.loads(msg_styles)
-                    self.user_styles.set_name_color(styles["nameColor"])
-                    self.user_styles.set_font_face(int(styles["fontFamily"]))
-                    self.user_styles.set_font_size(int(styles["fontSize"]))
-                    self.user_styles.set_font_color(styles["textColor"])
-                    self.user_styles.set_use_background(int(styles["usebackground"]))
+                    self._styles._name_color = styles["nameColor"]
+                    self._styles._font_face = int(styles["fontFamily"])
+                    self._styles._font_size = int(styles["fontSize"])
+                    self._styles._font_color = styles["textColor"]
+                    self._styles._use_background = int(styles["usebackground"])
                 except json.JSONDecodeError:
                     pass
 
-    def set_premium_user(self, premium):
-        self._is_premium = premium
-
     async def get_main_profile(self):
-        """Fetch user profile."""
         if not self.isanon:
-            tasks = await make_requests(self._links[2:])
-            items = tasks.get("mod1").result()
+            items = await http_get(self.links["mod1"])
             if items is not None:
                 about = items.replace('<?xml version="1.0" ?>', "")
                 gender_start = about.find("<s>")
                 gender_end = about.find("</s>", gender_start)
                 gender = about[gender_start + 3 : gender_end] if gender_start != -1 else "?"
-                self.user_styles.profile["about"]["gender"] = gender
+                self._styles._profile["about"]["gender"] = gender
 
                 location_start = about.find("<l")
                 location_end = about.find("</l>", location_start)
                 location = about[location_start + 2 : location_end] if location_start != -1 else ""
-                self.user_styles.profile["about"]["location"] = location
+                self._styles._profile["about"]["location"] = location
 
                 last_change_start = about.find("<b>")
                 last_change_end = about.find("</b>", last_change_start)
                 last_change = about[last_change_start + 3 : last_change_end] if last_change_start != -1 else ""
-                self.user_styles.profile["about"]["last_change"] = last_change
+                self._styles._profile["about"]["last_change"] = last_change
 
                 if last_change:
                     age = abs(datetime.datetime.now().year - int(last_change.split("-")[0]))
-                    self.user_styles.profile["about"]["age"] = age
+                    self._styles._profile["about"]["age"] = age
                 body_start = about.find("<body>")
                 body_end = about.find("</body>", body_start)
                 body = about[body_start + 6 : body_end] if body_start != -1 else ""
-                self.user_styles.profile["about"].update({"body": urllib.parse.unquote(body)})
+                self._styles._profile["about"].update({"body": urllib.parse.unquote(body)})
 
             try:
-                full_prof = tasks.get("mod2").result()
+                full_prof = await http_get(self.links["mod2"])
                 if full_prof is not None and str(full_prof)[:5] == "<?xml":
                     full_prof_start = full_prof.find("<body")
                     full_prof_end = full_prof.find("</body>", full_prof_start)
                     full_prof_body = (
                         full_prof[full_prof_start + len("<body") : full_prof_end] if full_prof_start != -1 else ""
                     )
-                    self.user_styles.profile["full"] = full_prof_body
+                    self._styles._profile["full"] = full_prof_body
             except (AttributeError, KeyError):
                 pass
 
 
+class Styles:
+    def __init__(
+        self,
+        name_color=None,
+        font_color=None,
+        font_face=None,
+        font_size=None,
+        use_background=None,
+    ):
+        self._name_color = name_color if name_color else str("000000")
+        self._font_color = font_color if font_color else str("000000")
+        self._font_size = font_size if font_size else 11
+        self._font_face = font_face if font_face else 0
+        self._use_background = int(use_background) if use_background else 0
+
+        self._blend_name = None
+        self._bg_style = {
+            "align": "",
+            "bgc": "",
+            "bgalp": "",
+            "hasrec": "0",
+            "ialp": "",
+            "isvid": "0",
+            "tile": "0",
+            "useimg": "0",
+        }
+        self._profile = dict(
+            about=dict(age="", last_change="", gender="?", location="", d="", body=""),
+            full=dict(),
+        )
+
+    def __dir__(self):
+        return public_attributes(self)
+
+    def __repr__(self):
+        return f"nc:{self.name_color} |bg:{self.use_background} |{self.default}"
+
+    @property
+    def about_me(self):
+        return self._profile["about"]
+
+    @property
+    def full_html(self):
+        o = html.escape(urllib.parse.unquote(self._profile["full"] or "")).replace("\r\n", "\n")
+        if o:
+            return o
+        else:
+            return None
+
+    @property
+    def full_mini(self):
+        o = html.escape(urllib.parse.unquote(self._profile["about"]["body"] or "")).replace("\r\n", "\n")
+        if o:
+            return o
+        else:
+            return None
+
+    @property
+    def bg_style(self):
+        return self._bg_style
+
+    @property
+    def use_background(self):
+        return self._use_background
+
+    @property
+    def default(self):
+        size = str(self.font_size)
+        face = str(self.font_face)
+        return f"<f x{size}{self.font_color}='{face}'>"
+
+    @property
+    def name_color(self):
+        return self._name_color
+
+    @property
+    def font_color(self):
+        return self._font_color
+
+    @property
+    def font_size(self):
+        return self._font_size
+
+    @property
+    def font_face(self):
+        return self._font_face
+
+
 class Friend:
-    """Friend user object."""
-
-    _FRIENDS = dict()
-
     def __init__(self, user: User, client: Optional[Any] = None):
         self.user = user
         self.name = user.name
@@ -303,41 +368,30 @@ class Friend:
     def __str__(self):
         return self.name
 
-    @classmethod
-    def get(cls, name):
-        """Get friend user by username."""
-        return cls._FRIENDS.get(name) or Friend(name)
-
     def __dir__(self):
-        return [x for x in set(list(self.__dict__.keys()) + list(dir(type(self)))) if x[0] != "_"]
+        return public_attributes(self)
 
     @property
     def showname(self):
-        """User showname."""
         return self.user.showname
 
     @property
     def client(self):
-        """User client."""
         return self._client
 
     @property
     def status(self):
-        """User status."""
         return self._status
 
     @property
     def last_active(self):
-        """Last time user was active."""
         return self._last_active
 
     @property
     def idle(self):
-        """Check if user is idle."""
         return self._idle
 
     def is_friend(self):
-        """Check if user is friend."""
         if self.client and not self.user.isanon:
             if self.name in self.client.friends:
                 return True
@@ -345,40 +399,41 @@ class Friend:
         return None
 
     async def send_friend_request(self):
-        """Send a friend request."""
-        if self.client and self.is_friend() is False:
+        """
+        Send a friend request
+        """
+        if self.client and self.is_friend() == False:
             return await self.client.addfriend(self.name)
 
     async def unfriend(self):
-        """Delete friend."""
-        if self.client and self.is_friend() is True:
+        """
+        Delete friend
+        """
+        if self.client and self.is_friend() == True:
             return await self.client.unfriend(self.name)
 
     @property
     def is_online(self):
-        """Check if user is online."""
         return self.status == "online"
 
     @property
     def is_offline(self):
-        """Check if user is offline."""
         return self.status in ["offline", "app"]
 
     @property
     def is_on_app(self):
-        """Check if user is using Android app client."""
         return self.status == "app"
 
     async def reply(self, message):
-        """Reply to user."""
         if self.client:
             await self.client.send_message(self.name, message)
 
     def _check_status(self, _time=None, _idle=None, idle_time=None):
-        if _time is None and idle_time is None:
+        """Check if user is online, idle, or offline."""
+        if _time == None and idle_time == None:
             self._last_active = None
             return
-        if _idle is not None:
+        if _idle != None:
             self._idle = _idle
         if self.status == "online" and int(idle_time) >= 1:
             self._last_active = time.time() - (int(idle_time) * 60)

@@ -30,10 +30,6 @@ $(VIRTUAL_ENVIRONMENT):
 		python3 -m venv $(VIRTUAL_ENVIRONMENT); \
 	fi
 
-.PHONY: dev
-dev: env
-	$(LOCAL_PYTHON) -m example
-
 .PHONY: run
 run: env
 	$(LOCAL_PYTHON) -m example
