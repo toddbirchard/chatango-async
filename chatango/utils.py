@@ -7,7 +7,9 @@ import re
 import string
 import aiohttp
 import urllib
-import logging
+
+from logger import LOGGER
+
 
 # fmt: off
 specials = {
@@ -79,7 +81,7 @@ def public_attributes(obj):
 
 
 async def on_request_exception(session, context, params):
-    logging.getLogger("aiohttp.client").debug(f"on request exception: <{params}>")
+    LOGGER.warning(f"on request exception: <{params}>")
 
 
 def trace():

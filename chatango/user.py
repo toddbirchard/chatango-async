@@ -6,6 +6,7 @@ import time
 import datetime
 from collections import deque
 
+from logger import LOGGER
 from .utils import Styles, make_requests, public_attributes
 
 
@@ -105,12 +106,12 @@ class User:
 
     @property
     def get_user_dir(self):
-        if not self.isanon:
+        if not self.is_anon:
             return "/%s/%s/" % ("/".join((self.name * 2)[:2]), self.name)
 
     @property
     def fullpic(self):
-        if not self.isanon:
+        if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}full.jpg"
         return False
 
@@ -120,7 +121,7 @@ class User:
 
     @property
     def msgbg(self):
-        if not self.isanon:
+        if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}msgbg.jpg"
         return False
 
@@ -130,7 +131,7 @@ class User:
 
     @property
     def thumb(self):
-        if not self.isanon:
+        if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}thumb.jpg"
         return False
 
@@ -176,7 +177,7 @@ class User:
         ]
 
     @property
-    def isanon(self):
+    def is_anon(self):
         return self._isanon
 
     def setName(self, val):
@@ -215,7 +216,7 @@ class User:
             "bl": "bottom left",
             "br": "bottom right",
         }
-        if not self.isanon:
+        if not self.is_anon:
             tasks = await make_requests(self._links[:2])
             msg_styles = tasks["msgstyles"].result()
             msg_bg = tasks["msgbg"].result()
@@ -240,7 +241,7 @@ class User:
 
     async def get_main_profile(self):
         """Fetch user profile."""
-        if not self.isanon:
+        if not self.is_anon:
             tasks = await make_requests(self._links[2:])
             items = tasks.get("mod1").result()
             if items is not None:
@@ -338,7 +339,7 @@ class Friend:
 
     def is_friend(self):
         """Check if user is friend."""
-        if self.client and not self.user.isanon:
+        if self.client and not self.user.is_anon:
             if self.name in self.client.friends:
                 return True
             return False

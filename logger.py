@@ -85,8 +85,11 @@ def json_formatter(record: dict) -> str:
     if record["level"].name == "INFO":
         record["extra"]["serialized"] = serialize_as_admin(record)
         return "{extra[serialized]},\n"
-    if record["level"].name in ("WARNING", "SUCCESS"):
+    if record["level"].name in ("TRACE", "WARNING", "SUCCESS"):
         record["extra"]["serialized"] = serialize_event(record)
+        return "{extra[serialized]},\n"
+    if record["level"].name in ("ERROR", "CRITICAL"):
+        record["extra"]["serialized"] = serialize_error(record)
         return "{extra[serialized]},\n"
     record["extra"]["serialized"] = serialize_error(record)
     return "{extra[serialized]},\n"
@@ -98,6 +101,8 @@ def log_formatter(record: dict) -> str:
     :param dict record: Key/value object containing a single log's message & metadata.
     :returns: str
     """
+    if record["level"].name == "TRACE":
+        return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> | <fg #cfe2f3>{level}</fg #cfe2f3>: <light-white>{message}</light-white>\n"
     if record["level"].name == "INFO":
         return "<fg #5278a3>{time:MM-DD-YYYY HH:mm:ss}</fg #5278a3> | <fg #b3cfe7>{level}</fg #b3cfe7>: <light-white>{message}</light-white>\n"
     if record["level"].name == "WARNING":

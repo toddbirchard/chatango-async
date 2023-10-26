@@ -114,10 +114,8 @@ class Socket:
             try:
                 await getattr(self, f"_rcmd_{cmd}")(args)
             except:
-                logger.error(f"Error while handling command {cmd}")
+                LOGGER.error(f"Error while handling command {cmd}")
                 traceback.print_exc(file=sys.stderr)
-        else:
-            logger.error(f"Unhandled received command {cmd}")
 
 
 class PM(Socket):
