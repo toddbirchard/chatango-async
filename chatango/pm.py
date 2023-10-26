@@ -203,7 +203,7 @@ class PM(Socket):
         if isinstance(target, User):
             target = target.name
         if self._silent > time.time():
-            await self.handler.call_event("pm_silent", message)
+            self.call_event("pm_silent", message)
         else:
             if len(message) > 0:
                 message = message  # format_videos(self.user, message)
@@ -215,7 +215,7 @@ class PM(Socket):
                 )
                 for msg in message_cut(message, self._maxlen):
                     msg = f'{nc}<m v="1"><g xs0="0"><g x{fs}s{fc}="{ff}">{msg}</g></g></m>'
-                    await self._send_command("msg", target.lower(), msg)
+                    await self.send_command("msg", target.lower(), msg)
 
     async def block(self, user):  # TODO
         if isinstance(user, User):

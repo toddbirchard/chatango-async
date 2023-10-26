@@ -1,16 +1,15 @@
 """Bot implementation demo."""
 import asyncio
-from typing import Union, List
 from config import config
-import chatango
+from chatango import Client, Room, User, Message
 
 
-class MyBot(chatango.Client):
+class MyBot(Client):
     """Example Chatango Bot Implementation."""
 
-    def __init__(self, name: str, password: str, rooms: List[str]):
-        """Bot constructor."""
-        super().__init__(name, password, rooms, pm=False)
+    async def on_connect(self, room: Room):
+        print(f"Connected to {room}")
+        await room.send_message("Beep boop I'm dead inside 🤖", use_html=True)
 
     async def on_init(self):
         """Action upon bot initialization."""
@@ -27,22 +26,18 @@ class MyBot(chatango.Client):
         else:
             print("[info] config.rooms is empty.")
 
-    async def on_connect(self, room: Union[chatango.Room, chatango.PM]):
-        """Action upon bot connection to a room."""
-        print(f"[info] Connected to {repr(room)}")
-
     async def on_disconnect(self, room):
         """Action upon bot disconnection from a room."""
         print(f"[info] Disconnected from {repr(room)}")
 
-    async def on_room_denied(self, room):
+    async def on_room_denied(self, room: Room):
         """
         This event get out when a room is deleted.
         self.rooms.remove(room_name)
         """
         print(f"[info] Rejected from {repr(room)}, ROOM must be deleted.")
 
-    async def on_room_init(self, room):
+    async def on_room_init(self, room: Room):
         """Action upon room initialization."""
         if room.user.isanon:
             room.set_font(name_color="000000", font_color="000000", font_face=1, font_size=11)
@@ -50,7 +45,7 @@ class MyBot(chatango.Client):
             await room.user.get_profile()
             await room.enable_bg()
 
-    async def on_message(self, message):
+    async def on_message(self, room: Room, message: Message):
         """
         Triggers upon chat message to parse commands.
 

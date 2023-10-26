@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Optional
 import asyncio
 import random
 import mimetypes
@@ -114,118 +114,98 @@ async def get_token(user_name, passwd):
 
 
 def multipart(data, files, boundary=None):
-    lineas = []
+    lines = []
 
     def escape_quote(s):
         return s.replace('"', '\\"')
 
     if boundary == None:
         boundary = "".join(random.choice(string.digits + string.ascii_letters) for x in range(30))
-    for nombre, valor in data.items():
-        lineas.extend(
+    for name, value in data.items():
+        lines.extend(
             (
                 "--%s" % boundary,
-                'Content-Disposition: form-data; name="%s"' % nombre,
+                'Content-Disposition: form-data; name="%s"' % name,
                 "",
-                str(valor),
+                str(value),
             )
         )
-    for nombre, valor in files.items():
-        filename = valor["filename"]
-        if "mimetype" in valor:
-            mimetype = valor["mimetype"]
+    for name, value in files.items():
+        filename = value["filename"]
+        if "mimetype" in value:
+            mimetype = value["mimetype"]
         else:
             mimetype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        lineas.extend(
+        lines.extend(
             (
                 "--%s" % boundary,
                 'Content-Disposition: form-data; name="%s"; '
-                'filename="%s"' % (escape_quote(nombre), escape_quote(filename)),
+                'filename="%s"' % (escape_quote(name), escape_quote(filename)),
                 "Content-Type: %s" % mimetype,
                 "",
-                valor["content"],
+                value["content"],
             )
         )
-    lineas.extend(
+    lines.extend(
         (
             "--%s--" % boundary,
             "",
         )
     )
-    body = "\r\n".join(lineas)
+    body = "\r\n".join(lines)
     headers = {
         "Content-Type": "multipart/form-data; boundary=%s" % boundary,
         "Content-Length": str(len(body)),
     }
     return body, headers
 
-    # async def upload_image(self, path, return_url=False):
-    #     if self.user.isanon:
-    #         return None
-    #     with open(path, mode="rb") as f:
-    #         files = {
-    #             "filedata": {"filename": path, "content": f.read().decode("latin-1")}
-    #         }
-    #     data, headers = multipart(
-    #         dict(u=self.client._default_user_name, p=self.client._default_password),
-    #         files,
-    #     )
-    #     headers.update({"host": "chatango.com", "origin": "http://st.chatango.com"})
-    #     async with get_aiohttp_session.post(
-    #         "http://chatango.com/uploadimg",
-    #         data=data.encode("latin-1"),
-    #         headers=headers,
-    #     ) as resp:
-    #         response = await resp.text()
-    #         if "success" in response:
-    #             success = response.split(":", 1)[1]
-    #     if success != None:
-    #         if return_url:
-    #             url = "http://ust.chatango.com/um/{}/{}/{}/img/t_{}.jpg"
-    #             return url.format(
-    #                 self.user.name[0], self.user.name[1], self.user.name, success
-    #             )
-    #         else:
-    #             return f"img{success}"
-    #     return None
 
-
-async def sessionget(session: aiohttp.ClientSession, url: str):
+async def http_get(url: str, session: Optional[aiohttp.ClientSession] = None):
+    if not session:
+        session = get_aiohttp_session()
     async with session.get(url) as resp:
         assert resp.status == 200
         try:
             resp = await resp.text()
             return resp
-        except:
+        except Exception as e:
+            return None
+
+
+async def session_get(session: aiohttp.ClientSession, url: str):
+    async with session.get(url) as resp:
+        assert resp.status == 200
+        try:
+            resp = await resp.text()
+            return resp
+        except Exception as e:
             return None
 
 
 async def make_requests(urls):
     r = {}
     for x in urls:
-        task = asyncio.create_task(sessionget(get_aiohttp_session(), x[1]))
+        task = asyncio.create_task(session_get(get_aiohttp_session(), x[1]))
         r[x[0]] = task
     await asyncio.gather(*r.values())
     return r
 
 
 def gen_uid() -> str:
-    """
-    Generate an uid
-    """
+    """Generate an uid."""
     return str(random.randrange(10**15, 10**16))
 
 
 def _clean_message(msg: str, pm: bool = False) -> Tuple[str, str, str]:
-    n = re.search("<n(.*?)/>", msg)
+    n = re.search(r"<n(.*?)/>", msg)
     tag = pm and "g" or "f"
-    f = re.search("<" + tag + "(.*?)>", msg)
-    msg = re.sub("<" + tag + ".*?>" + '|"<i s=sm://(.*)"', "", msg)
+    f = re.search(r"<" + tag + "(.*?)>", msg)
+    msg = re.sub(r"<" + tag + ".*?>" + '|"<i s=sm://(.*)"', "", msg)
     if n:
         n = n.group(1)
     if f:
         f = f.group(1)
-    msg = re.sub("<n.*?/>", "", msg)
+    msg = re.sub(r"<n.*?/>", "", msg)
     msg = _strip_html(msg)
     msg = html.unescape(msg).replace("\r", "\n")
     return msg, n or "", f or ""
@@ -271,13 +251,12 @@ def get_anon_name(tssid: str, puid: str) -> str:
 
 
 def _fontFormat(text):
-    # TODO check
     """Converts */_ into whattsap like formats"""
     formats = {"/": "I", "\*": "B", "_": "U"}
     for f in formats:
         f1, f2 = set(formats.keys()) - {f}
         # find = ' <?[BUI]?>?[{0}{1}]?{2}(.+?[\S]){2}'.format(f1, f2, f+'{1}')
-        find = " <?[BUI]?>?[{0}{1}]?{2}(.+?[\S]?[{2}]?){2}[{0}{1}]?[\s]".format(f1, f2, f)
+        find = r" <?[BUI]?>?[{0}{1}]?{2}(.+?[\S]?[{2}]?){2}[{0}{1}]?[\s]".format(f1, f2, f)
         for x in re.findall(find, " " + text + " "):
             original = f[-1] + x + f[-1]
             cambio = "<" + formats[f] + ">" + x + "</" + formats[f] + ">"
@@ -287,10 +266,9 @@ def _fontFormat(text):
 
 def _parseFont(f: str, pm=False) -> Tuple[str, str, str]:
     """
-    Lee el contendido de un etiqueta f y regresa
-    tamaño color y fuente (en ese orden)
-    @param f: El texto con la etiqueta f incrustada
-    @return: Tamaño, Color, Fuente
+    Fetches font size, color and font from a message.
+
+    :returns: Tuple[str, str, str]
     """
     if pm:
         regex = r'x(\d{1,2})?s([a-fA-F0-9]{6}|[a-fA-F0-9]{3})="|\'(.*?)"|\''
@@ -303,16 +281,16 @@ def _parseFont(f: str, pm=False) -> Tuple[str, str, str]:
 
 
 def _videoImagePMFormat(text):
-    """Returns text with formatted video and image for PM sending"""
-    for x in re.findall("(http[s]?://[^\s]+outube.com/watch\?v=([^\s]+))", text):
+    """Returns text with formatted video and image for PM sending."""
+    for x in re.findall(r"(http[s]?://[^\s]+outube.com/watch\?v=([^\s]+))", text):
         original = x[0]
         cambio = '<i s="vid://yt:%s" w="126" h="96"/>' % x[1]
         text = text.replace(original, cambio)
-    for x in re.findall("(http[s]?://[\S]+outu.be/([^\s]+))", text):
+    for x in re.findall(r"(http[s]?://[\S]+outu.be/([^\s]+))", text):
         original = x[0]
         cambio = '<i s="vid://yt:%s" w="126" h="96"/>' % x[1]
         text = text.replace(original, cambio)
-    for x in re.findall("http[s]?://[\S]+?.jpg", text):
+    for x in re.findall(r"http[s]?://[\S]+?.jpg", text):
         text = text.replace(x, '<i s="%s" w="70.45" h="125"/>' % x)
     return text
 

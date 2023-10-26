@@ -1,3 +1,4 @@
+"""Chatango Rooms."""
 from typing import Optional
 from collections import deque, namedtuple
 import html
@@ -21,7 +22,7 @@ from .utils import (
 from .message import Message, MessageFlags, _process, message_cut
 from .user import User, ModeratorFlags, AdminFlags
 from .exceptions import AlreadyConnectedError, InvalidRoomNameError
-from .handler import EventHandler
+from .handler import CommandHandler, EventHandler
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +53,16 @@ class RoomFlags(enum.IntFlag):
     UNSAFE = 1 << 29
 
 
-class Connection:
-    def __init__(self, handler: EventHandler):
-        self.handler = handler
+class Connection(CommandHandler):
+    """Websocket connection to Chatango."""
+
+    def __init__(self):
         self._reset()
 
     def _reset(self):
         self._connected = False
         self._first_command = True
+        self._connected = False
         self._connection: Optional[aiohttp.ClientWebSocketResponse] = None
         self._recv_task: Optional[asyncio.Task] = None
         self._ping_task: Optional[asyncio.Task] = None
@@ -87,26 +90,17 @@ class Connection:
             await self._connection.close()
         self._reset()
 
-    async def _send_command(self, *args, terminator="\r\n\0"):
-        message = ":".join(args) + terminator
-        if message != "\r\n\x00":  # ping
-            logger.debug(f'OUT {":".join(args)}')
+    async def _send_command(self, command, terminator="\r\n\0"):
+        message = command + terminator
         if self._connection:
             await self._connection.send_str(message)
 
     async def _do_ping(self):
-        """
-        Ping the socket every minute to keep alive
-        """
-        try:
-            while True:
-                await asyncio.sleep(90)
-                if not self.connected:
-                    break
+        """Ping the socket every minute to keep alive."""
+        while True:
+            await asyncio.sleep(90)
+            if self.connected:
                 await self._send_command("\r\n", terminator="\x00")
-                await self.handler.call_event("ping", self)
-        except asyncio.exceptions.CancelledError:
-            pass
 
     async def _do_recv(self):
         while self._connection:
@@ -115,40 +109,21 @@ class Connection:
                 break
             if message.type == aiohttp.WSMsgType.TEXT:
                 if message.data:
-                    logger.debug(" IN %s", message.data)
-                    await self._do_process(message.data)
-                else:
-                    await self._do_process("pong")
-            elif message.type in (
-                aiohttp.WSMsgType.CLOSE,
-                aiohttp.WSMsgType.CLOSING,
-                aiohttp.WSMsgType.CLOSED,
-                aiohttp.WSMsgType.ERROR,
+                    await self._receive_command(message.data)
+            elif (
+                message.type == aiohttp.WSMsgType.CLOSE
+                or message.type == aiohttp.WSMsgType.CLOSING
+                or message.type == aiohttp.WSMsgType.CLOSED
+                or message.type == aiohttp.WSMsgType.ERROR
             ):
-                await self._disconnect()
                 break
             else:
-                logger.error("Unexpected aiohttp.WSMsgType: %s", message.type)
+                logger.error(f"Unexpected aiohttp.WSMsgType: {message.type}")
             await asyncio.sleep(0.0001)
-        await self.handler.call_event("disconnect", self)
-
-    async def _do_process(self, recv: str):
-        """Process one command."""
-        if recv:
-            cmd, _, args = recv.partition(":")
-            args = args.split(":")
-        else:
-            return
-        if hasattr(self, f"_rcmd_{cmd}"):
-            try:
-                await getattr(self, f"_rcmd_{cmd}")(args)
-            except Exception:
-                logger.exception("Error while handling command %s", cmd)
-        else:
-            logger.error("Unhandled received command %s", cmd)
+        await self._disconnect()
 
 
-class Room(Connection):
+class Room(Connection, EventHandler):
     """Chatango room connection."""
 
     _BANDATA = namedtuple("BanData", ["unid", "ip", "target", "time", "src"])
@@ -156,43 +131,42 @@ class Room(Connection):
     def __dir__(self):
         return public_attributes(self)
 
-    def __init__(self, handler, name: str):
-        super().__init__(handler)
+    def __init__(self, name: str):
+        super().__init__()
         self.assert_valid_name(name)
         self.name = name
         self.server = get_server(name)
         self.reconnect = False
         self.owner: Optional[User] = None
         self._uid = gen_uid()
-        self._bwqueue = str()
+        self._banned_words = ("", "")
         self._user = None
         self._silent = False
         self._mods = dict()
-        self._userhistory = deque(maxlen=10)
+        self._user_history = deque(maxlen=10)
         self._userdict = dict()
         self._mqueue = dict()
         self._uqueue = dict()
-        self.msgs = dict()
-        self._banlist = dict()
-        self._unbanlist = dict()
-        self._unbanqueue = deque(maxlen=500)
+        self._messages = dict()
+        self._history = deque(maxlen=3000)
+        self._ban_list = dict()
+        self._unban_list = dict()
+        self._unban_queue = deque(maxlen=500)
         self._user_count = 0
-        self._del_dict = dict()
-        self._maxlen = 2700
-        self._history = deque(maxlen=self._maxlen + 300)
+        self._maxlen = 2800
         self._bg_mode = 0
-        self._nomore = False
-        self._connectiontime = None
+        self._no_more = False
+        self._connection_time = None
         self.message_flags = 0
         self._announcement = [0, 0, ""]
+        self._rate_limit = 0
         self._badge = 0
 
     def __repr__(self):
         return f"<Room {self.name}>"
 
     @property
-    def is_pm(self) -> bool:
-        """Whether this room is a PM."""
+    def is_pm(self):
         return False
 
     @property
@@ -207,14 +181,12 @@ class Room(Connection):
             return 0
 
     @property
-    def get_maxlen(self):
-        """Maximum message length."""
-        return self._maxlen
+    def unbanlist(self):
+        return list(set(x.target.name for x in self._unban_queue))
 
     @property
-    def unbanlist(self):
-        """List of unbanned users."""
-        return list(set(x.target.name for x in self._unbanqueue))
+    def messages(self):
+        return self._messages
 
     @property
     def history(self):
@@ -225,12 +197,16 @@ class Room(Connection):
         return self._silent
 
     @property
-    def banlist(self):
-        return list(self._banlist.keys())
+    def ban_list(self):
+        return list(self._ban_list.keys())
 
     @property
     def flags(self):
         return self._flags
+
+    @property
+    def rate_limit(self):
+        return self._rate_limit
 
     @property
     def user(self):
@@ -241,30 +217,30 @@ class Room(Connection):
         return set(self._mods.keys())
 
     @property
-    def userlist(self):
+    def user_list(self):
         return self._get_user_list()
 
     @property
-    def anonlist(self):
+    def anon_list(self):
         """Lista de anons detectados"""
-        return list(set(self.all_users_list) - set(self.userlist))
+        return list(set(self.all_user_list) - set(self.user_list))
 
     @property
-    def user_count(self):  # TODO
+    def user_count(self):
         """Len users -> user count"""
         if RoomFlags.NO_COUNTER in self.flags:
-            return len(self.all_users_list)
+            return len(self.all_user_list)
         return self._user_count
 
     @property
-    def all_users_list(self):
-        """List of all users in the room."""
+    def all_user_list(self):
+        """List all users (with anons)"""
         return sorted([x[1] for x in list(self._userdict.values())], key=lambda z: z.name.lower())
 
     @classmethod
     def assert_valid_name(cls, room_name: str):
         """Check if room name is valid."""
-        expr = re.compile("^([a-z0-9-]{1,20})$")
+        expr = re.compile(r"^([a-z0-9-]{1,20})$")
         if not expr.match(room_name):
             raise InvalidRoomNameError(room_name)
 
@@ -286,7 +262,7 @@ class Room(Connection):
         """
         Force this room to disconnect
         """
-        for x in self.userlist:
+        for x in self.user_list:
             x.removeSessionId(self, 0)
         self.reconnect = False
         await self._disconnect()
@@ -316,7 +292,7 @@ class Room(Connection):
         :param str user_name: Name of Chatango user to authenticate as.
         :param str password: Password of Chatango user to authenticate with.
         """
-        await self._send_command("bauth", self.name, self._uid, user_name, password)
+        await self.send_command("bauth", self.name, self._uid, user_name, password)
 
     async def _login(self, user_name: str, password: str):
         """
@@ -326,7 +302,7 @@ class Room(Connection):
         :param str password: Password of Chatango user to authenticate with.
         """
         self._user = User(user_name, isanon=not password)
-        await self._send_command("blogin", user_name, password)
+        await self.send_command("blogin", user_name, password)
 
     async def _logout(self):
         """Log out of current Chatango user account"""
@@ -345,20 +321,20 @@ class Room(Connection):
             msg = str(message)
             if not use_html:
                 msg = html.escape(msg, quote=False)
-            msg = msg.replace("\n", "\r").replace("~", "&#126;")
+                msg = msg.replace("\n", "\r").replace("~", "&#126;")
             for msg in message_cut(msg, self._maxlen):
                 message = f'<n{self.user.styles.name_color}/><f x{self.user.styles.font_size}{self.user.styles.font_color}="{self.user.styles.font_face}">{msg}</f>'
-                await self._send_command("bm", _id_gen(), str(message_flags), message)
+                await self.send_command("bm", _id_gen(), str(message_flags), message)
 
     def set_font(self, name_color=None, font_color=None, font_size=None, font_face=None):
         if name_color:
-            self._user.user_styles.set_name_color(str(name_color))
+            self._user._styles._name_color = str(name_color)
         if font_color:
-            self._user.user_styles.set_font_color(str(font_color))
+            self._user._styles._font_color = str(font_color)
         if font_size:
-            self._user.user_styles.set_font_size(int(font_size))
+            self._user._styles._font_size = int(font_size)
         if font_face:
-            self._user.user_styles.set_font_face(int(font_face))
+            self._user._styles._font_face = int(font_face)
 
     async def enable_bg(self):
         await self.set_bg_mode(1)
@@ -401,10 +377,10 @@ class Room(Connection):
 
     def ban_record(self, user):
         """Check if user is on banlist."""
-        if isinstance(user, User):  # TODO
+        if isinstance(user, User):
             user = user.name
-        if user.lower() in [x.name for x in self._banlist]:
-            return self._banlist[User(user)]
+        if user.lower() in [x.name for x in self._ban_list]:
+            return self._ban_list[User(user)]
         return None
 
     def get_last_message(self, user=None):
@@ -419,13 +395,25 @@ class Room(Connection):
         return None
 
     async def _raw_unban(self, name, ip, unid):
-        await self._send_command("removeblock", unid, ip, name)
+        await self.send_command("removeblock", unid, ip, name)
 
     def _add_history(self, msg):
         if len(self._history) == 2900:
             rest = self._history.popleft()
             rest.detach()
         self._history.append(msg)
+
+    def _add_history_left(self, msg):
+        """Add older history unless full."""
+        if self.history.maxlen and len(self._history) < self.history.maxlen:
+            self._history.appendleft(msg)
+            self._messages[msg.id] = msg
+
+    def _remove_history(self, msgid):
+        msg = self._messages.pop(msgid, None)
+        if msg and msg in self._history:
+            self._history.remove(msg)
+        return msg
 
     async def unban_user(self, user):
         rec = self.ban_record(user)
@@ -442,15 +430,17 @@ class Room(Connection):
             return True
         return False
 
-    async def _raw_ban(self, msgid, ip, name):
+    async def _raw_ban(self, msgid, ip, name) -> bool:
         """
         Ban user with received data
-        @param msgid: Message id
-        @param ip: user IP
-        @param name: chatango user name
-        @return: bool
+
+        :param str msgid: Message ID
+        :param str ip: User's IP
+        :param str name: Chatango user name
+
+        :returns: bool
         """
-        await self._send_command("block", msgid, ip, name)
+        await self.send_command("block", msgid, ip, name)
 
     async def ban_user(self, username: str) -> bool:
         """
@@ -459,7 +449,7 @@ class Room(Connection):
         :param str username: Name of the user to ban.
         """
         msg = self.get_last_message(username)
-        if msg and msg.user not in self.banlist:
+        if msg and msg.user not in self.ban_list:
             return await self.ban_message(msg)
         return False
 
@@ -476,7 +466,7 @@ class Room(Connection):
             msg = self.get_last_message(user)
             if msg:
                 name = "" if msg.user.isanon else msg.user.name
-                await self._send_command("delallmsg", msg.unid, msg.ip, name)
+                await self.send_command("delallmsg", msg.unid, msg.ip, name)
                 return True
         return False
 
@@ -496,8 +486,8 @@ class Room(Connection):
         return False
 
     async def request_unbanlist(self):
-        """"""
-        await self._send_command(
+        """Get list of unbanned users."""
+        await self.send_command(
             "blocklist",
             "unblock",
             str(int(time.time() + self._correctiontime)),
@@ -507,8 +497,9 @@ class Room(Connection):
             "1",
         )
 
-    async def request_banlist(self):  # TODO revisar
-        await self._send_command(
+    async def request_banlist(self):
+        """Get list of banned users."""
+        await self.send_command(
             "blocklist",
             "block",
             str(int(time.time() + self._correctiontime)),
@@ -526,34 +517,34 @@ class Room(Connection):
         :param str whole: List of all banned words (separated by comma)
         """
         if self.user in self._mods and ModeratorFlags.EDIT_BW in self._mods[self.user]:
-            await self._send_command("setbannedwords", urlreq.quote(part), urlreq.quote(whole))
+            await self.send_command("setbannedwords", urlreq.quote(part), urlreq.quote(whole))
             return True
         return False
 
     async def _reload(self):
         if self._user_count <= 1000:
-            await self._send_command("g_participants:start")
+            await self.send_command("g_participants:start")
         else:
-            await self._send_command("gparticipants:start")
-        await self._send_command("getpremium", "l")
-        await self._send_command("getannouncement")
-        await self._send_command("getbannedwords")
-        await self._send_command("getratelimit")
+            await self.send_command("gparticipants:start")
+        await self.send_command("getpremium", "l")
+        await self.send_command("getannouncement")
+        await self.send_command("getbannedwords")
+        await self.send_command("getratelimit")
         await self.request_banlist()
         await self.request_unbanlist()
-        if self.user.is_premium_user:
+        if self.user.ispremium:
             await self._style_init(self._user)
 
     async def set_bg_mode(self, mode):
         self._bg_mode = mode
         if self.connected:
-            await self._send_command("getpremium", "l")
-            if self.user.is_premium_user:
-                await self._send_command("msgbg", str(self._bg_mode))
+            await self.send_command("getpremium", "l")
+            if self.user.ispremium:
+                await self.send_command("msgbg", str(self._bg_mode))
 
     async def _style_init(self, user):
         if not user.isanon:
-            if self.user.is_premium_user:
+            if self.user.ispremium:
                 await user.get_styles()
             await user.get_main_profile()
         else:
@@ -564,8 +555,8 @@ class Room(Connection):
         self._puid = args[1]
         self._login_as = args[2]
         self._currentname = args[3]
-        self._connectiontime = args[4]
-        self._correctiontime = int(float(self._connectiontime) - time.time())
+        self._connection_time = args[4]
+        self._correctiontime = int(float(self._connection_time) - time.time())
         self._currentIP = args[5]
         self._flags = RoomFlags(int(args[7]))
         if self._login_as == "C":
@@ -583,7 +574,7 @@ class Room(Connection):
                 mod, power = mod.split(",")
                 self._mods[User(mod)] = ModeratorFlags(int(power))
                 self._mods[User(mod)].isadmin = ModeratorFlags(int(power)) & AdminFlags != 0
-        await self.handler.call_event("connect", self)
+        self.call_event("connect")
 
     async def _rcmd_inited(self, args):
         await self._reload()
@@ -598,13 +589,10 @@ class Room(Connection):
         anc = ":".join(args[2:])
         if anc != self._announcement[2]:
             self._announcement[2] = anc
-            await self.handler.call_event("AnnouncementUpdate", args[0] != "0")
-        await self.handler.call_event("Announcement", anc)
+            self.call_event("announcement_update", args[0] != "0")
+        self.call_event("announcement", anc)
 
-    async def _rcmd_pong(self, args):
-        await self.handler.call_event("pong", self)
-
-    async def _rcmd_nomore(self, args):  # TODO
+    async def _rcmd_nomore(self, args):
         """No more past messages"""
         pass
 
@@ -615,42 +603,31 @@ class Room(Connection):
     async def _rcmd_i(self, args):
         """history past messages"""
         msg = await _process(self, args)
-        msg.attach(self, msg.id)
-        self._add_history(msg)
+        self._add_history_left(msg)
 
-    async def _rcmd_b(self, args):  # TODO
+    async def _rcmd_b(self, args):
         msg = await _process(self, args)
-        if self._del_dict:
-            for message_inwait in self._del_dict:
-                if self._del_dict[message_inwait]["m"] == msg.body and self.user == msg.user:
-                    self._del_dict[message_inwait].update({"i": msg})
         if args[5] in self._uqueue:
-            msgid = self._uqueue.pop(args[5])
-            if msg.user != self._user:
-                pass
-            msg.attach(self, msgid)
+            msg.id = self._uqueue.pop(args[5])
             self._add_history(msg)
-            await self.handler.call_event("message", msg)
+            self.call_event("message", msg)
         else:
             self._mqueue[msg.id] = msg
 
-    async def _rcmd_premium(self, args):  # TODO
+    async def _rcmd_premium(self, args):
         if self._bg_mode and (args[0] == "210" or (isinstance(self, Room) and self.owner == self.user)):
-            self.user.is_premium_user = True
-            await self._send_command("msgbg", str(self._bg_mode))
+            self.user._ispremium = True
+            await self.send_command("msgbg", str(self._bg_mode))
 
     async def _rcmd_show_fw(self, args):
-        await self.handler._call_event("show_flood_warning", self)
+        self.call_event("show_flood_warning")
 
     async def _rcmd_u(self, args):
-        """Attachs and call event on_message"""
         if args[0] in self._mqueue:
             msg = self._mqueue.pop(args[0])
-            if msg.user != self._user:
-                pass
-            msg.attach(self, args[1])
+            msg.id = args[1]
             self._add_history(msg)
-            await self.handler.call_event("message", msg)
+            self.call_event("message", msg)
         else:
             self._uqueue[args[0]] = args[1]
 
@@ -677,8 +654,8 @@ class Room(Connection):
                     name = get_anon_name(contime, puid)
             user = User(name, isanon=isanon, puid=puid)
             if user in ({self.owner} | self.mods):
-                user.setName(name)
-            user.addSessionId(self, ssid)
+                user.set_name(name)
+            user.add_session_id(self, ssid)
             self._userdict[ssid] = [contime, user]
 
     async def _rcmd_participant(self, args):
@@ -697,74 +674,81 @@ class Room(Connection):
                 name = get_anon_name(contime, puid)
             isanon = True
         user = User(name, isanon=isanon, puid=puid, ip=unknown)
-        user.setName(name)
+        user.set_name(name)
         before = None
         if ssid in self._userdict:
             before = self._userdict[ssid][1]
         if cambio == "0":  # Leave
-            user.removeSessionId(self, ssid)
+            user.remove_session_id(self, ssid)
             if ssid in self._userdict:
                 usr = self._userdict.pop(ssid)[1]
-                lista = [x[1] for x in self._userhistory]
+                lista = [x[1] for x in self._user_history]
                 if usr not in lista:
-                    self._userhistory.append([contime, usr])
+                    self._user_history.append([contime, usr])
                 else:
-                    self._userhistory.remove([x for x in self._userhistory if x[1] == usr][0])
-                    self._userhistory.append([contime, usr])
+                    self._user_history.remove([x for x in self._user_history if x[1] == usr][0])
+                    self._user_history.append([contime, usr])
             if user.isanon:
-                await self.handler.call_event("anon_leave", self, user, puid)
+                self.call_event("anon_leave", user, puid)
             else:
-                await self.handler.call_event("leave", self, user, puid)
+                self.call_event("leave", user, puid)
         elif cambio == "1" or not before:  # Join
-            user.addSessionId(self, ssid)
-            if not user.isanon and user not in self.userlist:
-                await self.handler.call_event("join", self, user, puid)
+            user.add_session_id(self, ssid)
+            if not user.isanon and user not in self.user_list:
+                self.call_event("join", user, puid)
             elif user.isanon:
-                await self.handler.call_event("anon_join", self, user, puid)
+                self.call_event("anon_join", user, puid)
             self._userdict[ssid] = [contime, user]
-            lista = [x[1] for x in self._userhistory]
+            lista = [x[1] for x in self._user_history]
             if user in lista:
-                self._userhistory.remove([x for x in self._userhistory if x[1] == user][0])
+                self._user_history.remove([x for x in self._user_history if x[1] == user][0])
         else:  # TODO
             if before.isanon:  # Login
                 if user.isanon:
-                    await self.handler.call_event("anon_login", self, before, user, puid)
+                    self.call_event("anon_login", before, user, puid)
                 else:
-                    await self.handler.call_event("user_login", self, before, user, puid)
+                    self.call_event("user_login", before, user, puid)
             elif not before.isanon:  # Logout
-                if before in self.userlist:
-                    lista = [x[1] for x in self._userhistory]
+                if before in self.user_list:
+                    lista = [x[1] for x in self._user_history]
 
                     if before not in lista:
-                        self._userhistory.append([contime, before])
+                        self._user_history.append([contime, before])
                     else:
-                        lst = [x for x in self._userhistory if before == x[1]]
+                        lst = [x for x in self._user_history if before == x[1]]
                         if lst:
-                            self._userhistory.remove(lst[0])
-                        self._userhistory.append([contime, before])
-                    await self.handler.call_event("user_logout", self, before, user, puid)
+                            self._user_history.remove(lst[0])
+                        self._user_history.append([contime, before])
+                    self.call_event("user_logout", before, user, puid)
 
             self._userdict[ssid] = [contime, user]
 
     async def _rcmd_mods(self, args):
         pre = self._mods
-        mods = self._mods = dict()
+        mods = self._mods = {}
+
+        # Last mod removed
+        if len(args) == 1 and args[0] == "":
+            (user, _) = pre.popitem()
+            self.call_event("mod_remove", user)
+            return
+
         # Load current mods
         for mod in args:
             name, powers = mod.split(",", 1)
-            utmp = User.get(name)
+            utmp = User(name)
             self._mods[utmp] = ModeratorFlags(int(powers))
             self._mods[utmp].isadmin = ModeratorFlags(int(powers)) & AdminFlags != 0
         tuser = User(self._currentname)
         if (self.user not in pre and self.user in mods) or (tuser not in pre and tuser in mods):
             if self.user == tuser:
-                await self.handler.call_event("mod_added", self.user)
+                self.call_event("mod_added", self.user)
             return
 
         for user in self.mods - set(pre.keys()):
-            await self.handler.call_event("mod_added", user)
+            self.call_event("mod_added", user)
         for user in set(pre.keys()) - self.mods:
-            await self.handler.call_event("mod_remove", user)
+            self.call_event("mod_remove", user)
         for user in set(pre.keys()) & self.mods:
             privs = set(
                 x
@@ -773,26 +757,26 @@ class Room(Connection):
             )
             privs = privs - {"MOD_ICON_VISIBLE", "value"}
             if privs:
-                await self.handler.call_event("mods_change", user, privs)
+                self.call_event("mods_change", user, privs)
 
     async def _rcmd_groupflagsupdate(self, args):
         flags = args[0]
-        self._flags = self._flags = RoomFlags(int(flags))
-        await self.handler.call_event("flags_update")
+        self._flags = RoomFlags(int(flags))
+        self.call_event("group_flags")
 
-    async def _rcmd_blocked(self, args):  # TODO
+    async def _rcmd_blocked(self, args):
         target = args[2] and User(args[2]) or ""
         user = User(args[3])
         if not target:
             msx = [msg for msg in self._history if msg.unid == args[0]]
             target = msx and msx[0].user or User("ANON")
-            await self.handler.call_event("anon_ban", user, target)
+            self.call_event("anon_ban", user, target)
         else:
-            await self.handler.call_event("ban", user, target)
-        self._banlist[target] = self._BANDATA(args[0], args[1], target, float(args[4]), user)
+            self.call_event("ban", user, target)
+        self._ban_list[target] = self._BANDATA(args[0], args[1], target, float(args[4]), user)
 
-    async def _rcmd_blocklist(self, args):  # TODO
-        self._banlist = {}
+    async def _rcmd_blocklist(self, args):
+        self._ban_list = dict()
         sections = ":".join(args).split(";")
         for section in sections:
             params = section.split(":")
@@ -801,8 +785,8 @@ class Room(Connection):
             if params[2] == "":
                 continue
             user = User(params[2])
-            self._banlist[user] = self._BANDATA(params[0], params[1], user, float(params[3]), User(params[4]))
-        await self.handler.call_event("banlist_update")
+            self._ban_list[user] = self._BANDATA(params[0], params[1], user, float(params[3]), User(params[4]))
+        self.call_event("banlist_update")
 
     async def _rcmd_unblocked(self, args):
         """Unban event triggered in a room."""
@@ -812,16 +796,16 @@ class Room(Connection):
         # bnsrc = args[-3]
         ubsrc = User(args[-2])
         time = args[-1]
-        self._unbanqueue.append(self._BANDATA(unid, ip, target, float(time), ubsrc))
+        self._unban_queue.append(self._BANDATA(unid, ip, target, float(time), ubsrc))
         if target == "":
             msx = [msg for msg in self._history if msg.unid == unid]
             target = msx and msx[0].user or User("anon", isanon=True)
-            await self.handler.call_event("anon_unban", ubsrc, target)
+            self.call_event("anon_unban", ubsrc, target)
         else:
             target = User(target)
-            if target in self._banlist:
-                self._banlist.pop(target)
-            await self.handler.call_event("unban", ubsrc, target)
+            if target in self._ban_list:
+                self._ban_list.pop(target)
+            self.call_event("unban", ubsrc, target)
 
     async def _rcmd_unblocklist(self, args):
         sections = ":".join(args).split(";")
@@ -834,66 +818,60 @@ class Room(Connection):
             target = User(params[2] or "Anon")
             time = float(params[3])
             src = User(params[4])
-            self._unbanqueue.append(self._BANDATA(unid, ip, target, time, src))
-        await self.handler.call_event("unbanlist_update")
+            self._unban_queue.append(self._BANDATA(unid, ip, target, time, src))
+        self.call_event("unbanlist_update")
 
     async def _rcmd_clearall(self, args):
-        await self.handler.call_event("clearall", args[0])
+        self.call_event("clearall", args[0])
 
     async def _rcmd_denied(self, args):
         await self.disconnect()
-        await self.handler.call_event("room_denied", self)
+        self.call_event("room_denied")
 
     async def _rcmd_updatemoderr(self, args):
-        await self.handler.call_event("mod_update_error", User(args[1]), args[0])
+        self.call_event("mod_update_error", User(args[1]), args[0])
 
     async def _rcmd_proxybanned(self, args):
-        await self.handler.call_event("proxy_banned")
+        self.call_event("proxy_banned")
+
+    async def _rcmd_show_fw(self, args):
+        self.call_event("show_flood_warning")
 
     async def _rcmd_show_tb(self, args):
-        await self.handler._call_event("show_temp_ban", self, int(args[0]))
+        self.call_event("show_temp_ban", int(args[0]))
+
+    async def _rcmd_tb(self, args):
+        """Temporary ban sigue activo con el tiempo indicado"""
+        self.call_event("temp_ban", int(args[0]))
 
     async def _rcmd_miu(self, args):
-        await self.handler.call_event("bg_reload", User(args[0]))
+        self.call_event("bg_reload", User(args[0]))
 
     async def _rcmd_delete(self, args):
         """Borrar un mensaje de mi vista actual"""
-        msg = self.msgs.get(args[0])
-        if msg and msg in self._history:
-            self._history.remove(msg)
-            await self.handler.call_event("message_delete", msg.user, msg)
-            msg.detach()
+        msg = self._remove_history(args[0])
+        if msg:
+            self.call_event("delete_message", msg)
         #
-        if len(self._history) < 20 and not self._nomore:
-            await self._send_command("get_more:20:0")
+        if len(self._history) < 20 and not self._no_more:
+            await self.send_command("get_more:20:0")
 
     async def _rcmd_deleteall(self, args):
         """Mensajes han sido borrados"""
-        user = None  # usuario borrado
-        msgs = []  # mensajes borrados
-        for msgid in args:
-            msg = self.msgs.get(msgid)
-            if msg and msg in self._history:
-                self._history.remove(msg)
-                user = msg.user
-                msg.detach()
-                msgs.append(msg)
+        msgs_nones = [self._remove_history(msgid) for msgid in args]
+        msgs = [msg for msg in msgs_nones if msg]
         if msgs:
-            await self.handler.call_event("delete_user", user, msgs)
+            self.call_event("delete_user", msgs)
 
-    async def _rcmd_bw(self, args):  # Palabras baneadas en el chat
-        # TODO, actualizar el registro del chat
+    async def _rcmd_bw(self, args):
+        """Receive banned word lists from server."""
         part, whole = "", ""
         if args:
             part = urlreq.unquote(args[0])
         if len(args) > 1:
             whole = urlreq.unquote(args[1])
-        if hasattr(self, "_bwqueue"):
-            # self._bwqueue = [self._bwqueue.split(':', 1)[0] + ',' + args[0],
-            #                  self._bwqueue.split(':', 1)[1] + ',' + args[1]]
-            # TODO agregar un callEvent
-            await self.set_banned_words(*self._bwqueue)
-        await self.handler.call_event("bannedwords_update", part, whole)
+        self._banned_words = (part, whole)
+        self.call_event("banned_words")
 
     async def _rcmd_getannc(self, args):
         # ['3', 'pythonrpg', '5', '60', '<nE20/><f x1100F="1">hola']
@@ -913,49 +891,37 @@ class Room(Connection):
         pass  # print("GETRATELIMIT -> ", args)
 
     async def _rcmd_msglexceeded(self, args):
-        # print(f"_rcmd_msglexceeded ->", args)
-        await self.handler.call_event("room_message_length_exceeded")
+        self.call_event("room_message_length_exceeded")
 
-    async def _rcmd_ubw(self, args):  # TODO palabas desbaneadas ?)
-        self._ubw = args
-        # print(f"{self.name}_rcmd_ubw", args)
+    # Server updated banned words
+    async def _rcmd_ubw(self, args):
+        await self.send_command("getbannedwords")
 
     async def _rcmd_climited(self, args):
-        # print(f"{self.name}_rcmd_climited", args)
         pass  # Climited
 
     async def _rcmd_show_nlp(self, args):
-        # print(f"{self.name}_rcmd_show_nlp", args)
         pass  # Auto moderation
 
     async def _rcmd_nlptb(self, args):
-        # print(f"{self.name}_rcmd_nlptb", args)
         pass  # Auto moderation temporary ban
 
-    async def _rcmd_tb(self, args):
-        """Temporary ban is still active."""
-        # print(f"{self.name}_rcmd_tb", args)
-        await self.handler.call_event("flood_ban_repeat", int(args[0]))
-
     async def _rcmd_logoutfirst(self, args):
-        # print(f"{self.name}_rcmd_logoutfirst", args)
         pass
 
     async def _rcmd_logoutok(self, args, Force=False):
         """Log out & login as anon."""
         name = get_anon_name(str(self._correctiontime).split(".")[0][-4:], self._puid)
         self._user = User(name, isanon=True, ip=self._currentIP)
-        # TODO fail aquiCLOSE
-        await self.handler.call_event("logout", self._user, "?")
+        self.call_event("logout", self._user, "?")
 
     async def _rcmd_updateprofile(self, args):
-        """Listen for user profile updates within a room."""
-        user = User.get(args[0])
-        user.profile = None
-        await self.handler.call_event("profile_changes", user)
+        """Cuando alguien actualiza su perfil en un chat"""
+        user = User(args[0])
+        user._profile = None
+        self.call_event("profile_changes", user)
 
     async def _rcmd_reload_profile(self, args):
-        """Reload a user's profile."""
-        user = User.get(args[0])
-        user.profile = None
-        await self.handler.call_event("profile_reload", user)
+        user = User(args[0])
+        user._profile = None
+        self.call_event("profile_reload", user)
