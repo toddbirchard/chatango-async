@@ -1,6 +1,5 @@
 """Top-level Chatango client event-handler."""
 import asyncio
-import logging
 from typing import Dict, List, Optional
 
 from .pm import PM
@@ -8,8 +7,7 @@ from .room import Room
 from .handler import TaskHandler
 from .utils import public_attributes
 
-
-logger = logging.getLogger(__name__)
+from logger import LOGGER
 
 
 class ConnectionListener:
@@ -58,7 +56,7 @@ class Client(TaskHandler):
         self.running = True
 
         if not forever and not self.use_pm and not self.initial_rooms:
-            logger.error("No rooms or PM to join. Exiting.")
+            LOGGER.error("No rooms or PM to join. Exiting.")
             return
 
         if self.use_pm:
@@ -75,9 +73,22 @@ class Client(TaskHandler):
             await self.complete_tasks()
         self.running = False
 
+    async def on_connect(self, room: Room):
+        LOGGER.info(f"Connected to {room}")
+        await room.send_message("Beep boop I'm dead inside 🤖", use_html=True)
+
+    async def on_start(self):
+        """Action upon bot start."""
+        if self.rooms:
+            for room in self.rooms:
+                task = room.join(room)
+                await asyncio.ensure_future(task)
+            await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})
+            LOGGER.info(f"Bot successfully joined all rooms: {' ,'.join(self.rooms)}")
+
     def join_pm(self):
         if not self.username or not self.password:
-            logger.error("PM requires username and password.")
+            LOGGER.error("PM requires username and password.")
             return
 
         self.add_task(self._watch_pm())
@@ -99,7 +110,7 @@ class Client(TaskHandler):
     def join_room(self, room_name: str):
         Room.assert_valid_name(room_name)
         if room_name in self.rooms:
-            logger.error(f"Already joined room {room_name}")
+            LOGGER.error(f"Already joined room {room_name}")
             # Attempt to reconnect existing room?
             return
 
@@ -141,7 +152,7 @@ class Client(TaskHandler):
             await asyncio.wait_for(self.connection_checker(), timeout=self.connection_check_timeout)
         except asyncio.TimeoutError:
             problem_rooms = set(self.initial_rooms) - set(self.initial_rooms_connected)
-            logger.error(f"Failed to connect: {', '.join(problem_rooms)}")
+            LOGGER.error(f"Failed to connect: {', '.join(problem_rooms)}")
             self.add_task(self.on_started())
 
     async def on_started(self):

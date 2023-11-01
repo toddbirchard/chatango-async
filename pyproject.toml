@@ -14,7 +14,7 @@ keywords = ["Chatango", "Chatbot", "Chat", "Bot", "Python"]
 python = ">=3.10,<4"
 asyncio = "*"
 aiohttp = "*"
-pytest = "*"
+pytest = "*" 
 black = "*"
 isort = "*"
 flake8 = "*"
@@ -23,6 +23,7 @@ loguru = "*"
 python-dotenv = "*"
 pydantic = "*"
 pydantic-settings = "*"
+coverage = "^7.3.2"
 
 [tool.poetry.scripts]
 run = "example"

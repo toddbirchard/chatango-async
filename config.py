@@ -1,5 +1,4 @@
 """Example config values for tutorial."""
-from typing import List
 from os import getenv, path
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
