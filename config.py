@@ -1,5 +1,6 @@
 """Example config values for tutorial."""
 from os import getenv, path
+from typing import List
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
@@ -21,7 +22,8 @@ class Config(BaseSettings):
     CHATANGO_BOT_PASSWORD: str = getenv("CHATANGO_BOT_PASSWORD")
 
     # Chatango rooms to join
-    CHATANGO_ROOMS: str = getenv("CHATANGO_TEST_ROOM")
+    CHATANGO_TEST_ROOMS: List[str] = [getenv("CHATANGO_TEST_ROOM")]
+    print(CHATANGO_TEST_ROOMS)
 
 
 config = Config()

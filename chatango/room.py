@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 class RoomFlags(enum.IntFlag):
+    """Enum of possible room attributes."""
+
     LIST_TAXONOMY = 1 << 0
     NO_ANONS = 1 << 2
     NO_FLAGGING = 1 << 3
@@ -142,15 +144,15 @@ class Room(Connection, EventHandler):
         self._banned_words = ("", "")
         self._user = None
         self._silent = False
-        self._mods = dict()
+        self._mods = {}
         self._user_history = deque(maxlen=10)
-        self._userdict = dict()
-        self._mqueue = dict()
-        self._uqueue = dict()
-        self._messages = dict()
+        self._user_dict = {}
+        self._mqueue = {}
+        self._uqueue = {}
+        self._messages = {}
         self._history = deque(maxlen=3000)
-        self._ban_list = dict()
-        self._unban_list = dict()
+        self._ban_list = {}
+        self._unban_list = {}
         self._unban_queue = deque(maxlen=500)
         self._user_count = 0
         self._maxlen = 2800
@@ -235,7 +237,7 @@ class Room(Connection, EventHandler):
     @property
     def all_user_list(self):
         """List all users (with anons)"""
-        return sorted([x[1] for x in list(self._userdict.values())], key=lambda z: z.name.lower())
+        return sorted([x[1] for x in list(self._user_dict.values())], key=lambda z: z.name.lower())
 
     @classmethod
     def assert_valid_name(cls, room_name: str):
@@ -301,7 +303,7 @@ class Room(Connection, EventHandler):
         :param str user_name: Name of Chatango user to authenticate as.
         :param str password: Password of Chatango user to authenticate with.
         """
-        self._user = User(user_name, isanon=not password)
+        self._user = User(user_name, is_anon=not password)
         await self.send_command("blogin", user_name, password)
 
     async def _logout(self):
@@ -351,7 +353,7 @@ class Room(Connection, EventHandler):
     def _get_user_list(self, unique=1, memory=0, anons=False):
         ul = []
         if not memory:
-            ul = [x[1] for x in self._userdict.copy().values() if anons or not x[1].isanon]
+            ul = [x[1] for x in self._user_dict.copy().values() if anons or not x[1].is_anon]
         elif type(memory) == int:
             ul = set(
                 map(
@@ -425,7 +427,7 @@ class Room(Connection, EventHandler):
 
     async def ban_message(self, msg: Message) -> bool:
         if self.get_level(self.user) > 0:
-            name = "" if msg.user.isanon else msg.user.name
+            name = "" if msg.user.is_anon else msg.user.name
             await self._raw_ban(msg.unid, msg.ip, name)
             return True
         return False
@@ -465,7 +467,7 @@ class Room(Connection, EventHandler):
         if self.get_level(self.user) > 0:
             msg = self.get_last_message(user)
             if msg:
-                name = "" if msg.user.isanon else msg.user.name
+                name = "" if msg.user.is_anon else msg.user.name
                 await self.send_command("delallmsg", msg.unid, msg.ip, name)
                 return True
         return False
@@ -543,7 +545,7 @@ class Room(Connection, EventHandler):
                 await self.send_command("msgbg", str(self._bg_mode))
 
     async def _style_init(self, user):
-        if not user.isanon:
+        if not user.is_anon:
             if self.user.ispremium:
                 await user.get_styles()
             await user.get_main_profile()
@@ -564,7 +566,7 @@ class Room(Connection, EventHandler):
                 str(self._correctiontime).split(".")[0][-4:].replace("-", ""),
                 self._puid,
             )
-            self._user = User(uname, isanon=True, ip=self._currentIP)
+            self._user = User(uname, is_anon=is_anonTrue, ip=self._currentIP)
         elif self._login_as == "M":
             self._user = User(self._currentname, puid=self._puid, ip=self._currentIP)
         elif self._login_as == "N":
@@ -580,7 +582,7 @@ class Room(Connection, EventHandler):
         await self._reload()
 
     async def _rcmd_pwdok(self, args):
-        self._user._isanon = False
+        self._user._is_anon = False
         await self._send_command("getpremium", "l")
         await self._style_init(self._user)
 
@@ -616,7 +618,7 @@ class Room(Connection, EventHandler):
 
     async def _rcmd_premium(self, args):
         if self._bg_mode and (args[0] == "210" or (isinstance(self, Room) and self.owner == self.user)):
-            self.user._ispremium = True
+            self.user._is_premium = True
             await self.send_command("msgbg", str(self._bg_mode))
 
     async def _rcmd_show_fw(self, args):
@@ -636,7 +638,7 @@ class Room(Connection, EventHandler):
         await self._rcmd_g_participants(len(args) > 1 and args[1:] or "")
 
     async def _rcmd_g_participants(self, args):
-        self._userdict = dict()
+        self._user_dict = {}
         args = ":".join(args).split(";")  # return if not args
         for data in args:
             data = data.split(":")  # Lista de un solo usuario
@@ -645,18 +647,18 @@ class Room(Connection, EventHandler):
             puid = data[2]
             name = data[3]
             tname = data[4]
-            isanon = False
+            is_anon = False
             if str(name) == "None":
-                isanon = True
+                is_anon = True
                 if str(tname) != "None":
                     name = tname
                 else:
                     name = get_anon_name(contime, puid)
-            user = User(name, isanon=isanon, puid=puid)
+            user = User(name, is_anon=is_anon, puid=puid)
             if user in ({self.owner} | self.mods):
                 user.set_name(name)
             user.add_session_id(self, ssid)
-            self._userdict[ssid] = [contime, user]
+            self._user_dict[ssid] = [contime, user]
 
     async def _rcmd_participant(self, args):
         cambio = args[0]  # Leave Join Change
@@ -666,49 +668,49 @@ class Room(Connection, EventHandler):
         tname = args[4]  # Anon Name
         unknown = args[5]  # ip
         contime = args[6]  # time
-        isanon = False
+        is_anon = False
         if name == "None":
             if tname != "None":
                 name = tname
             else:
                 name = get_anon_name(contime, puid)
-            isanon = True
-        user = User(name, isanon=isanon, puid=puid, ip=unknown)
+            is_anon = True
+        user = User(name, is_anon=is_anon, puid=puid, ip=unknown)
         user.set_name(name)
         before = None
-        if ssid in self._userdict:
-            before = self._userdict[ssid][1]
+        if ssid in self._user_dict:
+            before = self._user_dict[ssid][1]
         if cambio == "0":  # Leave
             user.remove_session_id(self, ssid)
-            if ssid in self._userdict:
-                usr = self._userdict.pop(ssid)[1]
+            if ssid in self._user_dict:
+                usr = self._user_dict.pop(ssid)[1]
                 lista = [x[1] for x in self._user_history]
                 if usr not in lista:
                     self._user_history.append([contime, usr])
                 else:
                     self._user_history.remove([x for x in self._user_history if x[1] == usr][0])
                     self._user_history.append([contime, usr])
-            if user.isanon:
+            if user.is_anon:
                 self.call_event("anon_leave", user, puid)
             else:
                 self.call_event("leave", user, puid)
         elif cambio == "1" or not before:  # Join
             user.add_session_id(self, ssid)
-            if not user.isanon and user not in self.user_list:
+            if not user.is_anon and user not in self.user_list:
                 self.call_event("join", user, puid)
-            elif user.isanon:
+            elif user.is_anon:
                 self.call_event("anon_join", user, puid)
-            self._userdict[ssid] = [contime, user]
+            self._user_dict[ssid] = [contime, user]
             lista = [x[1] for x in self._user_history]
             if user in lista:
                 self._user_history.remove([x for x in self._user_history if x[1] == user][0])
         else:  # TODO
-            if before.isanon:  # Login
-                if user.isanon:
+            if before.is_anon:  # Login
+                if user.is_anon:
                     self.call_event("anon_login", before, user, puid)
                 else:
                     self.call_event("user_login", before, user, puid)
-            elif not before.isanon:  # Logout
+            elif not before.is_anon:  # Logout
                 if before in self.user_list:
                     lista = [x[1] for x in self._user_history]
 
@@ -721,7 +723,7 @@ class Room(Connection, EventHandler):
                         self._user_history.append([contime, before])
                     self.call_event("user_logout", before, user, puid)
 
-            self._userdict[ssid] = [contime, user]
+            self._user_dict[ssid] = [contime, user]
 
     async def _rcmd_mods(self, args):
         pre = self._mods
@@ -776,7 +778,7 @@ class Room(Connection, EventHandler):
         self._ban_list[target] = self._BANDATA(args[0], args[1], target, float(args[4]), user)
 
     async def _rcmd_blocklist(self, args):
-        self._ban_list = dict()
+        self._ban_list = {}
         sections = ":".join(args).split(";")
         for section in sections:
             params = section.split(":")
@@ -799,7 +801,7 @@ class Room(Connection, EventHandler):
         self._unban_queue.append(self._BANDATA(unid, ip, target, float(time), ubsrc))
         if target == "":
             msx = [msg for msg in self._history if msg.unid == unid]
-            target = msx and msx[0].user or User("anon", isanon=True)
+            target = msx and msx[0].user or User("anon", is_anon=is_anonTrue)
             self.call_event("anon_unban", ubsrc, target)
         else:
             target = User(target)
@@ -912,7 +914,7 @@ class Room(Connection, EventHandler):
     async def _rcmd_logoutok(self, args, Force=False):
         """Log out & login as anon."""
         name = get_anon_name(str(self._correctiontime).split(".")[0][-4:], self._puid)
-        self._user = User(name, isanon=True, ip=self._currentIP)
+        self._user = User(name, is_anon=is_anonTrue, ip=self._currentIP)
         self.call_event("logout", self._user, "?")
 
     async def _rcmd_updateprofile(self, args):

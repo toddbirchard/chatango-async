@@ -24,7 +24,7 @@ class Bot(Client):
 
     async def on_room_init(self, room: Room):
         """Action upon room initialization."""
-        if room.user.isanon:
+        if room.user.is_anon:
             room.set_font(name_color="000000", font_color="000000", font_face=1, font_size=11)
         else:
             await room.user.get_profile()
@@ -34,6 +34,7 @@ class Bot(Client):
         """
         Triggers upon chat message to parse commands.
 
+        :param Room room: Room object where the message was received.
         :param Message message: Raw message object received from a user.
 
         :returns: None

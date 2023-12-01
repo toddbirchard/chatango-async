@@ -62,10 +62,10 @@ class User:
             self._ip = None
             self._flags = 0
             self._history = deque(maxlen=5)
-            self._isanon = False
-            self._sids = dict()
-            self._showname = name
-            self._ispremium = None
+            self._is_anon = False
+            self._sids = {}
+            self._show_name = name
+            self._is_premium = None
             self._puid = str()
             self._client = None
             self._last_time = None
@@ -80,7 +80,7 @@ class User:
         return public_attributes(self)
 
     def __repr__(self):
-        return "<User name:{} puid:{} ip:{}>".format(self.showname, self._puid, self._ip)
+        return "<User name:{} puid:{} ip:{}>".format(self.show_name, self._puid, self._ip)
 
     @property
     def age(self):
@@ -100,12 +100,12 @@ class User:
 
     @property
     def get_user_dir(self):
-        if not self.isanon:
+        if not self.is_anon:
             return "/%s/%s/" % ("/".join((self.name * 2)[:2]), self.name)
 
     @property
     def fullpic(self):
-        if not self.isanon:
+        if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}full.jpg"
         return False
 
@@ -115,7 +115,7 @@ class User:
 
     @property
     def msgbg(self):
-        if not self.isanon:
+        if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}msgbg.jpg"
         return False
 
@@ -125,7 +125,7 @@ class User:
 
     @property
     def thumb(self):
-        if not self.isanon:
+        if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}thumb.jpg"
         return False
 
@@ -147,11 +147,11 @@ class User:
 
     @property
     def ispremium(self):
-        return self._ispremium
+        return self._is_premium
 
     @property
-    def showname(self):
-        return self._showname
+    def show_name(self):
+        return self._show_name
 
     @property
     def links(self):
@@ -163,11 +163,11 @@ class User:
         }
 
     @property
-    def isanon(self):
-        return self._isanon
+    def is_anon(self):
+        return self._is_anon
 
     def set_name(self, val):
-        self._showname = val
+        self._show_name = val
         self._name = val.lower()
 
     def del_profile(self):
@@ -202,7 +202,7 @@ class User:
             "bl": "bottom left",
             "br": "bottom right",
         }
-        if not self.isanon:
+        if not self.is_anon:
             msg_styles = await http_get(self.links["msgstyles"])
             msg_bg = await http_get(self.links["msgbg"])
             if msg_bg:
@@ -222,7 +222,7 @@ class User:
                     pass
 
     async def get_main_profile(self):
-        if not self.isanon:
+        if not self.is_anon:
             items = await http_get(self.links["mod1"])
             if items is not None:
                 about = items.replace('<?xml version="1.0" ?>', "")
@@ -372,8 +372,8 @@ class Friend:
         return public_attributes(self)
 
     @property
-    def showname(self):
-        return self.user.showname
+    def show_name(self):
+        return self.user.show_name
 
     @property
     def client(self):
@@ -392,7 +392,7 @@ class Friend:
         return self._idle
 
     def is_friend(self):
-        if self.client and not self.user.isanon:
+        if self.client and not self.user.is_anon:
             if self.name in self.client.friends:
                 return True
             return False

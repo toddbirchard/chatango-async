@@ -91,9 +91,9 @@ async def _process(room, args):
     strip_body = " ".join(body.split(" ")[:-1]) + " " + body.split(" ")[-1].replace("\n", "")
     msg.body = strip_body.strip()
     name_color = None
-    isanon = False
+    is_anon = False
     if name == "":
-        isanon = True
+        is_anon = True
         if not tname:
             if n in ["None"]:
                 n = None
@@ -108,7 +108,7 @@ async def _process(room, args):
             name_color = n
         else:
             name_color = None
-    msg.user = User(name, ip=ip, isanon=isanon)
+    msg.user = User(name, ip=ip, is_anon=is_anon)
     msg.user._styles._name_color = name_color
     msg.styles = msg.user._styles
     msg.styles._font_size, msg.styles._font_color, msg.styles._font_face = _parseFont(f.strip())
@@ -122,8 +122,8 @@ async def _process(room, args):
     msg.channel = Channel(msg.room, msg.user)
     ispremium = MessageFlags.PREMIUM in msg.flags
     if msg.user.ispremium != ispremium:
-        evt = msg.user._ispremium != None and ispremium != None and _time > time.time() - 5
-        msg.user._ispremium = ispremium
+        evt = msg.user._is_premium != None and ispremium != None and _time > time.time() - 5
+        msg.user._is_premium = ispremium
         if evt:
             room.call_event("premium_change", msg.user, ispremium)
     return msg
@@ -161,7 +161,7 @@ def message_cut(message, lenth):
 def mentions(body, room):
     t = []
     for match in re.findall("(\s)?@([a-zA-Z0-9]{1,20})(\s)?", body):
-        for participant in room.userlist:
+        for participant in room.user_list:
             if participant.name.lower() == match[1].lower():
                 if participant not in t:
                     t.append(participant)

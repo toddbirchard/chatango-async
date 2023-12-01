@@ -134,7 +134,7 @@ class PM(Socket):
         self._uid = gen_uid()
         self._silent = 0
         self._maxlen = 11600
-        self._friends = dict()
+        self._friends = {}
         self._blocked = list()
         self._premium = False
         self._history = list()
