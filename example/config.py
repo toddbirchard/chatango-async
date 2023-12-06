@@ -23,7 +23,6 @@ class Config(BaseSettings):
 
     # Chatango rooms to join
     CHATANGO_TEST_ROOMS: List[str] = [getenv("CHATANGO_TEST_ROOM")]
-    print(CHATANGO_TEST_ROOMS)
 
 
 config = Config()

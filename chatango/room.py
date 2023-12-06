@@ -183,7 +183,7 @@ class Room(Connection, EventHandler):
             return 0
 
     @property
-    def unbanlist(self):
+    def unban_list(self):
         return list(set(x.target.name for x in self._unban_queue))
 
     @property
@@ -308,7 +308,7 @@ class Room(Connection, EventHandler):
 
     async def _logout(self):
         """Log out of current Chatango user account"""
-        await self._send_command("blogout")
+        await self.send_command("blogout")
 
     async def send_message(self, message: Message, use_html=True, flags=None):
         """
@@ -458,7 +458,7 @@ class Room(Connection, EventHandler):
     async def clear_all(self):
         """Delete all messages (requires mod privileges)."""
         if self.user in self._mods and ModeratorFlags.EDIT_GROUP in self._mods[self.user] or self.user == self.owner:
-            await self._send_command("clearall")
+            await self.send_command("clearall")
             return True
         return False
 
@@ -475,7 +475,7 @@ class Room(Connection, EventHandler):
     async def delete_message(self, message):
         """Delete a single message (requires mod privileges)."""
         if self.get_level(self.user) > 0 and message.id:
-            await self._send_command("delmsg", message.id)
+            await self.send_command("delmsg", message.id)
             return True
         return False
 
@@ -534,19 +534,19 @@ class Room(Connection, EventHandler):
         await self.send_command("getratelimit")
         await self.request_banlist()
         await self.request_unbanlist()
-        if self.user.ispremium:
+        if self.user.is_premium:
             await self._style_init(self._user)
 
     async def set_bg_mode(self, mode):
         self._bg_mode = mode
         if self.connected:
             await self.send_command("getpremium", "l")
-            if self.user.ispremium:
+            if self.user.is_premium:
                 await self.send_command("msgbg", str(self._bg_mode))
 
     async def _style_init(self, user):
         if not user.is_anon:
-            if self.user.ispremium:
+            if self.user.is_premium:
                 await user.get_styles()
             await user.get_main_profile()
         else:
@@ -556,7 +556,7 @@ class Room(Connection, EventHandler):
         self.owner = User(args[0])
         self._puid = args[1]
         self._login_as = args[2]
-        self._currentname = args[3]
+        self._current_name = args[3]
         self._connection_time = args[4]
         self._correctiontime = int(float(self._connection_time) - time.time())
         self._currentIP = args[5]
@@ -566,9 +566,9 @@ class Room(Connection, EventHandler):
                 str(self._correctiontime).split(".")[0][-4:].replace("-", ""),
                 self._puid,
             )
-            self._user = User(uname, is_anon=is_anonTrue, ip=self._currentIP)
+            self._user = User(uname, is_anon=True, ip=self._currentIP)
         elif self._login_as == "M":
-            self._user = User(self._currentname, puid=self._puid, ip=self._currentIP)
+            self._user = User(self._current_name, puid=self._puid, ip=self._currentIP)
         elif self._login_as == "N":
             pass
         for mod in args[6].split(";"):
@@ -583,7 +583,7 @@ class Room(Connection, EventHandler):
 
     async def _rcmd_pwdok(self, args):
         self._user._is_anon = False
-        await self._send_command("getpremium", "l")
+        await self.send_command("getpremium", "l")
         await self._style_init(self._user)
 
     async def _rcmd_annc(self, args):
@@ -741,7 +741,7 @@ class Room(Connection, EventHandler):
             utmp = User(name)
             self._mods[utmp] = ModeratorFlags(int(powers))
             self._mods[utmp].isadmin = ModeratorFlags(int(powers)) & AdminFlags != 0
-        tuser = User(self._currentname)
+        tuser = User(self._current_name)
         if (self.user not in pre and self.user in mods) or (tuser not in pre and tuser in mods):
             if self.user == tuser:
                 self.call_event("mod_added", self.user)
@@ -791,7 +791,7 @@ class Room(Connection, EventHandler):
         self.call_event("banlist_update")
 
     async def _rcmd_unblocked(self, args):
-        """Unban event triggered in a room."""
+        """Unban event"""
         unid = args[0]
         ip = args[1]
         target = args[2].split(";")[0]
@@ -801,7 +801,7 @@ class Room(Connection, EventHandler):
         self._unban_queue.append(self._BANDATA(unid, ip, target, float(time), ubsrc))
         if target == "":
             msx = [msg for msg in self._history if msg.unid == unid]
-            target = msx and msx[0].user or User("anon", is_anon=is_anonTrue)
+            target = msx and msx[0].user or User("anon", isanon=True)
             self.call_event("anon_unban", ubsrc, target)
         else:
             target = User(target)
@@ -914,7 +914,7 @@ class Room(Connection, EventHandler):
     async def _rcmd_logoutok(self, args, Force=False):
         """Log out & login as anon."""
         name = get_anon_name(str(self._correctiontime).split(".")[0][-4:], self._puid)
-        self._user = User(name, is_anon=is_anonTrue, ip=self._currentIP)
+        self._user = User(name, isanon=True, ip=self._currentIP)
         self.call_event("logout", self._user, "?")
 
     async def _rcmd_updateprofile(self, args):

@@ -1,7 +1,7 @@
 """Objects to use for testing."""
 import pytest
 from example.example_bot import Bot
-from config import config
+from example.config import config
 
 
 @pytest.fixture

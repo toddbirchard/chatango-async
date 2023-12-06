@@ -114,7 +114,7 @@ class User:
         return self._last_time
 
     @property
-    def msgbg(self):
+    def msg_bg(self):
         if not self.is_anon:
             return f"{self._fp}{self.get_user_dir}msgbg.jpg"
         return False
@@ -146,7 +146,7 @@ class User:
         return self._puid
 
     @property
-    def ispremium(self):
+    def is_premium(self):
         return self._is_premium
 
     @property
@@ -288,10 +288,10 @@ class Styles:
             "tile": "0",
             "useimg": "0",
         }
-        self._profile = dict(
-            about=dict(age="", last_change="", gender="?", location="", d="", body=""),
-            full=dict(),
-        )
+        self._profile = {
+            "about": {"age": "", "last_change": "", "gender": "?", "location": "", "d": "", "body": ""},
+            "full": {},
+        }
 
     def __dir__(self):
         return public_attributes(self)

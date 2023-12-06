@@ -120,12 +120,12 @@ async def _process(room, args):
             msg.styles._use_background = 1
     msg.mentions = mentions(msg.body, room)
     msg.channel = Channel(msg.room, msg.user)
-    ispremium = MessageFlags.PREMIUM in msg.flags
-    if msg.user.ispremium != ispremium:
-        evt = msg.user._is_premium != None and ispremium != None and _time > time.time() - 5
-        msg.user._is_premium = ispremium
+    is_premium = MessageFlags.PREMIUM in msg.flags
+    if msg.user.is_premium != is_premium:
+        evt = msg.user._is_premium is not None and is_premium is not None and _time > time.time() - 5
+        msg.user._is_premium = is_premium
         if evt:
-            room.call_event("premium_change", msg.user, ispremium)
+            room.call_event("premium_change", msg.user, is_premium)
     return msg
 
 

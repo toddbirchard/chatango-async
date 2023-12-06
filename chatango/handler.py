@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 class TaskHandler:
     """Handler for all async chat tasks."""
 
+    def __init__(self):
+        self._task_loop = asyncio.create_task(self.tasks_forever())
+        self._tasks = []
+
     @property
     def tasks(self):
         assert self.task_loop
@@ -85,20 +89,25 @@ class TaskHandler:
 
 
 class EventHandler(TaskHandler):
-    """Abstract class to enable chat room to generate events, customs bots to implement callbacks."""
+    """Handler for events and listeners."""
+
+    def __init__(self):
+        super().__init__()
+        self._listeners = set()
 
     @property
     def listeners(self):
+        """All objects listening here for events"""
         if not hasattr(self, "_listeners"):
             self._listeners = set()
         return self._listeners
 
     def add_listener(self, listener):
-        """Add a listener for our events."""
+        """Add a listener for our events"""
         self.listeners.add(listener)
 
     def call_event(self, event: str, *args, **kwargs):
-        """Trigger event which looks for callback methods on the object and any listening objects."""
+        """Trigger an event which looks for callback methods on this and any listening objects."""
         attr = f"on_{event}"
         self._log_event(event, *args, **kwargs)
         # Call a generic event handler for all events
@@ -132,19 +141,20 @@ class EventHandler(TaskHandler):
 
 
 class CommandHandler:
-    """Handle commands using the protocol of the subclass (websocket, tcp, etc.)"""
+    """Abstract class to enable chat room to send commands, customs bots to implement handlers."""
 
     async def _send_command(self, *args, **kwargs):
+        """Internal method to send a command using the protocol of the subclass (websocket, tcp, etc.)"""
         raise TypeError("CommandHandler child class must implement _send_command")
 
     async def send_command(self, *args):
-        """Public send method."""
+        """Public send method"""
         command = ":".join(args)
         logger.debug(f"OUT {command}")
         await self._send_command(command)
 
     async def _receive_command(self, command: str):
-        """Receive incoming command and call a handler method."""
+        """Receive an incoming command and dynamically call a handler."""
         if not command:
             return
         logger.debug(f" IN {command}")
